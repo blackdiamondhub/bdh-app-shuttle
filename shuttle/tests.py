@@ -296,6 +296,66 @@ class ReminderApiTests(TestCase):
         self.assertEqual(r.status_code, 403)
 
 
+class ManifestTests(TestCase):
+    def test_hub_api_2_manifest(self):
+        from shuttle.plugin import spec
+        m = spec.manifest()
+        self.assertEqual(m["api_version"], 2)
+        self.assertEqual(m["permissions"], [])
+        self.assertEqual((m["network"], m["lifecycle"], m["memory_mb"]), ("lan", "always", 96))
+        types = {s.key: s.type for s in spec.settings}
+        self.assertEqual(types["reminders_api_key"], "secret")
+
+
+class BrokerTests(TestCase):
+    """In its container the app reads its settings and the API key from the broker."""
+
+    def setUp(self):
+        from bdh_sdk import rpc
+        from bdh_sdk.testing import FakeBroker
+
+        cache.clear()
+        # events.subscribe: the hub test process itself subscribes once the RPC is installed.
+        self.broker = FakeBroker(grants=("settings.get", "secrets.get", "events.subscribe"),
+                                 install=True, app_id="shuttle")
+        self.broker.start()
+        self.addCleanup(self.broker.stop)
+        self.flush = lambda: rpc.flush(5)
+        self.broker.settings[("shuttle", "reminders_url")] = "http://ad.test/bdl_shuttle"
+        self.ad = FakeAppDaemon()
+        p = patch.object(reminders.requests, "post", side_effect=self.ad)
+        p.start()
+        self.addCleanup(p.stop)
+
+    def add(self):
+        with at(local(2026, 12, 1, 16, 0)):
+            return self.client.post(reverse("shuttle_reminders"), json.dumps(
+                {"action": "add", "departure": "2026-12-01T17:50:00-07:00", "lead_min": 10}),
+                content_type="application/json")
+
+    def test_reminder_uses_secret_from_broker(self):
+        self.broker.secrets[("shuttle", "reminders_api_key")] = "vault-key"
+        self.assertEqual(self.add().status_code, 200)
+        self.flush()
+        self.assertEqual(self.ad.calls[0][1]["X-API-Key"], "vault-key")
+        self.assertEqual([p["name"] for p in self.broker.ops("secrets.get")][:1],
+                         ["reminders_api_key"])
+        self.assertIn({"app": "shuttle", "key": "reminders_url"},
+                      [{k: p.get(k) for k in ("app", "key")} for p in self.broker.ops("settings.get")])
+
+    def test_falls_back_to_plain_setting(self):
+        self.broker.settings[("shuttle", "reminders_api_key")] = "plain-key"
+        self.assertEqual(self.add().status_code, 200)
+        self.assertEqual(self.ad.calls[0][1]["X-API-Key"], "plain-key")
+
+    def test_secret_refused_falls_back(self):
+        self.broker.grants = ["settings.get", "events.subscribe"]
+        self.broker.settings[("shuttle", "reminders_api_key")] = "plain-key"
+        with self.assertLogs("shuttle.config", "WARNING"):
+            self.assertEqual(self.add().status_code, 200)
+        self.assertEqual(self.ad.calls[0][1]["X-API-Key"], "plain-key")
+
+
 class HomepageTests(TestCase):
     def setUp(self):
         cache.clear()

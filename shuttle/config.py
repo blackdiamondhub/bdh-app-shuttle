@@ -1,9 +1,12 @@
 """Settings for the shuttle app (``BDH_SHUTTLE_*``)."""
 import datetime as dt
+import logging
 
+from bdh_sdk import secrets
 from bdh_sdk.settings import app_setting
 
 APP_ID = "shuttle"
+logger = logging.getLogger(__name__)
 
 
 def _date(key, default):
@@ -32,7 +35,13 @@ def reminders_url():
 
 
 def reminders_api_key():
-    return app_setting(APP_ID, "reminders_api_key", "")
+    """The bdl_shuttle API key: the app's secret, else the old plain setting."""
+    try:
+        key = secrets.get("reminders_api_key", "", app=APP_ID)
+    except Exception:  # noqa: BLE001 - broker unreachable or refused
+        logger.warning("reading the reminders_api_key secret failed", exc_info=True)
+        key = ""
+    return key or app_setting(APP_ID, "reminders_api_key", "")
 
 
 def skikrumb_key():
