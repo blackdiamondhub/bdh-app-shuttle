@@ -1,9 +1,9 @@
-/* Shuttle — ported from the approved mockup. The page fills the screen under
-   the hub's fixed navbar; the departures list scrolls on its own. */
+/* Shuttle — ported from the approved mockup. The page fills the hub's iframe
+   (the hub navbar sits outside it); the departures list scrolls on its own. */
 body.sh-page{font-family:"Segoe UI",system-ui,sans-serif;color:#e8eef5;overflow:hidden;
   background:radial-gradient(ellipse 120% 80% at 50% 0%,#1d2a3f 0%,#101722 55%,#07090d 100%) fixed}
 .sh-page *{box-sizing:border-box}
-.sh-wrap{position:fixed;top:62px;left:0;right:0;bottom:0;display:flex;padding:22px 28px 24px 36px;gap:26px}
+.sh-wrap{position:fixed;top:0;left:0;right:0;bottom:0;display:flex;padding:22px 28px 24px 36px;gap:26px}
 
 .sh-mapc{flex:1;position:relative;border-radius:22px;overflow:hidden;border:1px solid rgba(255,255,255,.1);min-width:0}
 #sh-map{position:absolute;inset:0;background:#1a1a1f}
