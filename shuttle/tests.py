@@ -1,5 +1,6 @@
 import datetime as dt
 import json
+import os
 from unittest.mock import MagicMock, patch
 
 from django.contrib.staticfiles.testing import StaticLiveServerTestCase
@@ -8,7 +9,9 @@ from django.test import TestCase, override_settings, tag
 from django.urls import reverse
 from django.utils import timezone
 
-from shuttle import live, reminders, schedule, stops
+from bdh_sdk.storage import app_state
+
+from shuttle import live, reminders, schedule, stops, worker
 from shuttle.homepage import status as homepage_status
 
 UTC = dt.timezone.utc
@@ -28,37 +31,24 @@ def times(b):
     return [r.get("time") or r["brk"] for r in b["rows"]]
 
 
-class FakeAppDaemon:
-    """Stands in for the bdl_shuttle endpoint behind requests.post."""
-
-    def __init__(self):
-        self.recs, self.calls = [], []
-
-    def __call__(self, url, json=None, timeout=None, headers=None):
-        self.calls.append((json, headers))
-        cmd = json["cmd"]
-        resp = MagicMock(status_code=200)
-        if cmd == "add":
-            dep = dt.datetime.fromisoformat(json["departure"])
-            rec = {"id": f"r{len(self.recs) + 1}", "departure": json["departure"],
-                   "lead_min": json["lead_min"], "stop": json["stop"], "status": "pending",
-                   "destination": json["destination"],
-                   "fire_at": (dep - dt.timedelta(minutes=json["lead_min"])).isoformat()}
-            self.recs.append(rec)
-            resp.json.return_value = {"reminder": rec}
-        elif cmd == "cancel":
-            self.recs = [r for r in self.recs if r["id"] != json["id"]]
-            resp.json.return_value = {"ok": True}
-        elif cmd == "list":
-            resp.json.return_value = {"reminders": list(self.recs)}
-        else:
-            resp.status_code = 400
-            resp.json.return_value = {"error": "unknown cmd"}
-        return resp
+DINING, DECK = "media_player.dining_room", "media_player.deck"
+SPK = {"BDH_SHUTTLE_SPEAKERS": f"{DINING},{DECK}"}
+LABELS = [(DINING, "Dining Room (Sonos)"), (DECK, "Deck (Sonos) - offline")]
 
 
-REM = dict(BDH_SHUTTLE_REMINDERS_URL="http://ad.test/api/appdaemon/bdl_shuttle",
-           BDH_SHUTTLE_REMINDERS_API_KEY="k")
+def speakers_on(**extra):
+    return patch.dict(os.environ, {**SPK, **extra})
+
+
+class Fresh:
+    """Start every test with no reminders, in memory or in app state."""
+
+    def setUp(self):
+        super().setUp()
+        cache.clear()
+        app_state("shuttle").delete("reminders")
+        reminders.reset_cache()
+        self.addCleanup(reminders.reset_cache)
 
 
 class ScheduleTests(TestCase):
@@ -196,10 +186,7 @@ class LiveTests(TestCase):
             self.assertLess(near, 40, s["id"])
 
 
-class PageTests(TestCase):
-    def setUp(self):
-        cache.clear()
-
+class PageTests(Fresh, TestCase):
     def test_in_season_page(self):
         with at(local(2026, 12, 1, 16, 22)):
             r = self.client.get(reverse("shuttle"))
@@ -207,18 +194,18 @@ class PageTests(TestCase):
         self.assertContains(r, 'data-t="2026-12-01T16:30:00-07:00"')
         self.assertContains(r, "Shuttle (live)")
         self.assertContains(r, "Lookout Ridge")
-        self.assertNotContains(r, "Remind me")  # reminders not configured
+        self.assertNotContains(r, "Remind me")  # no speakers allowed yet
         geo = json.loads(r.content.decode().split('id="sh-geo" type="application/json">')[1].split("</script>")[0])
         self.assertEqual(geo["our"], "E7")
 
-    @override_settings(**REM)
     def test_reminder_bells_only_from_the_lodge(self):
-        with at(local(2026, 12, 1, 16, 22)):
+        with at(local(2026, 12, 1, 16, 22)), speakers_on():
             r = self.client.get(reverse("shuttle"))
         self.assertContains(r, "Remind me")
         self.assertContains(r, 'class="rb" data-dep="2026-12-01T16:30:00-07:00"')
         self.assertNotContains(r, 'data-dep="2026-12-01T16:20:00-07:00"')
         self.assertContains(r, 'id="sh-ov"')
+        self.assertContains(r, 'id="sh-spk"')
 
     def test_off_season_page(self):
         with at(local(2026, 11, 3, 12)):
@@ -233,61 +220,168 @@ class PageTests(TestCase):
             r = self.client.get(reverse("shuttle_live"))
         self.assertEqual(r.json(), {"ok": True, "stale": False, "buses": []})
 
+    def test_popup(self):
+        r = self.client.get(reverse("shuttle_popup", args=[10]))
+        self.assertContains(r, "Shuttle in 10 minutes")
+        self.assertContains(r, "To the Village from Lookout Ridge")
+        self.assertContains(self.client.get(reverse("shuttle_popup", args=[1])), "Shuttle in 1 minute<")
 
-@override_settings(**REM)
-class ReminderApiTests(TestCase):
+
+class ReminderStoreTests(Fresh, TestCase):
+    DEP = local(2026, 12, 1, 17, 50)
+    NOW = local(2026, 12, 1, 16, 0)
+
     def setUp(self):
-        cache.clear()
-        self.ad = FakeAppDaemon()
-        self.p = patch.object(reminders.requests, "post", side_effect=self.ad)
-        self.p.start()
-        self.addCleanup(self.p.stop)
+        super().setUp()
+        p = speakers_on()
+        p.start()
+        self.addCleanup(p.stop)
+
+    def test_add_update_cancel_and_survive_restart(self):
+        r = reminders.add(self.DEP, 10, now=self.NOW)
+        self.assertEqual((r["departure"], r["fire_at"], r["speakers"]),
+                         ("2026-12-01T17:50:00-07:00", "2026-12-01T17:40:00-07:00", None))
+        again = reminders.add(self.DEP, 5, [DECK], now=self.NOW)  # same bus: updated, not added
+        self.assertEqual(again["id"], r["id"])
+        reminders.reset_cache()  # as if the hub restarted
+        self.assertEqual(reminders.pending(), [again])
+        self.assertEqual(again["speakers"], [DECK])
+        self.assertTrue(reminders.cancel(r["id"]))
+        self.assertFalse(reminders.cancel(r["id"]))
+        reminders.reset_cache()
+        self.assertEqual(reminders.pending(), [])
+
+    def test_rejects_too_late_too_many_and_bad_speakers(self):
+        with self.assertRaisesRegex(ValueError, "Too late for a 10-minute"):
+            reminders.add(self.DEP, 10, now=local(2026, 12, 1, 17, 40))
+        for bad in ([], ["media_player.garage"], "kitchen"):
+            with self.assertRaises(ValueError, msg=bad):
+                reminders.add(self.DEP, 10, bad, now=self.NOW)
+        for n in range(reminders.MAX_ACTIVE):
+            reminders.add(self.DEP + dt.timedelta(hours=n), 10, now=self.NOW)
+        with self.assertRaisesRegex(ValueError, "up to 5"):
+            reminders.add(self.DEP + dt.timedelta(hours=9), 10, now=self.NOW)
+
+    def test_tick_plays_due_late_and_drops_missed(self):
+        a = reminders.add(self.DEP, 10, now=self.NOW)
+        b = reminders.add(self.DEP + dt.timedelta(hours=1), 10, now=self.NOW)
+        c = reminders.add(self.DEP + dt.timedelta(hours=2), 10, now=self.NOW)
+        self.assertEqual(reminders.next_wake(self.NOW), 100 * 60)
+        self.assertEqual(reminders.tick(local(2026, 12, 1, 17, 39)), [])
+        # Both came due while the hub was down: a's bus has gone (dropped), b's is 3 minutes out.
+        with self.assertLogs("shuttle.reminders", "WARNING"):
+            due = reminders.tick(local(2026, 12, 1, 18, 47))
+        self.assertEqual([(r["id"], m) for r, m in due], [(b["id"], 3)])
+        self.assertNotIn(a["id"], [r["id"] for r in reminders.pending()])
+        self.assertEqual([r["id"] for r in reminders.pending()], [c["id"]])
+        # Missed by more than the bus: dropped, not played.
+        with self.assertLogs("shuttle.reminders", "WARNING"):
+            self.assertEqual(reminders.tick(local(2026, 12, 1, 19, 50)), [])
+        reminders.reset_cache()
+        self.assertEqual(reminders.pending(), [])
+
+    def test_targets_follow_the_allowed_list(self):
+        self.assertEqual(reminders.targets({"speakers": None}), [DINING, DECK])
+        self.assertEqual(reminders.targets({"speakers": [DECK]}), [DECK])
+        with patch.dict(os.environ, {"BDH_SHUTTLE_SPEAKERS": DINING}):
+            self.assertEqual(reminders.targets({"speakers": [DECK]}), [])  # deck no longer allowed
+
+
+class WorkerTests(Fresh, TestCase):
+    @patch("bdh_sdk.alerts.push")
+    def test_fire_pops_up_and_announces_even_at_night(self, push):
+        with speakers_on(BDH_SHUTTLE_VOLUME="40", BDH_SHUTTLE_CHIME="kalimba"), \
+                patch("shuttle.worker.threading.Thread") as thread:
+            r = reminders.add(local(2026, 12, 2, 2, 10), 10, [DECK], now=local(2026, 12, 2, 1, 0))
+            [(rec, minutes)] = reminders.tick(local(2026, 12, 2, 2, 0))  # 2 am
+            worker.handle([(rec, minutes)])
+        alert = push.call_args.args[0]
+        self.assertEqual((alert.key, alert.title, alert.embed_url, alert.sound),
+                         (f"reminder:{r['id']}", "Shuttle in 10 minutes", "/shuttle/popup/10/", "kalimba"))
+        self.assertIn("in about 10 minutes", alert.speak)
+        kw = thread.call_args.kwargs
+        self.assertEqual((kw["target"], kw["args"][1]), (worker.announce, [DECK]))
+        with speakers_on(BDH_SHUTTLE_VOLUME="40", BDH_SHUTTLE_CHIME="kalimba"), \
+                patch("bdh_sdk.speakers.announce", return_value=[]) as ann:
+            worker.announce(*kw["args"])
+        self.assertEqual(ann.call_args.args[1], [DECK])
+        self.assertEqual((ann.call_args.kwargs["volume"], ann.call_args.kwargs["chime"]), (40, "kalimba"))
+
+    @patch("bdh_sdk.alerts.push")
+    def test_no_speakers_left_is_screens_only(self, push):
+        with patch("shuttle.worker.threading.Thread") as thread, \
+                patch.dict(os.environ, {"BDH_SHUTTLE_SPEAKERS": DINING}), \
+                self.assertLogs("shuttle.worker", "WARNING"):
+            worker.fire({"id": "x", "speakers": [DECK]}, 5)
+        push.assert_called_once()
+        thread.assert_not_called()
+
+    def test_announce_failures_are_logged_not_raised(self):
+        with patch("bdh_sdk.speakers.announce", side_effect=RuntimeError("HA down")), \
+                self.assertLogs("shuttle.worker", "ERROR"):
+            worker.announce("hi", [DECK])
+
+    def test_should_start(self):
+        self.assertFalse(worker.should_start(["manage.py", "test"]))
+        self.assertTrue(worker.should_start(["/x/bdh_sdk/runtime/__main__.py"]))
+        with patch.dict(os.environ, {"BDH_SHUTTLE_WORKER": "0"}):
+            self.assertFalse(worker.should_start(["/x/bdh_sdk/runtime/__main__.py"]))
+
+
+class ReminderApiTests(Fresh, TestCase):
+    def setUp(self):
+        super().setUp()
+        p = speakers_on()
+        p.start()
+        self.addCleanup(p.stop)
         self.url = reverse("shuttle_reminders")
 
     def post(self, body):
         return self.client.post(self.url, json.dumps(body), content_type="application/json")
 
     def test_add_list_cancel(self):
-        with at(local(2026, 12, 1, 16, 0)):
-            r = self.post({"action": "add", "departure": "2026-12-01T17:50:00-07:00", "lead_min": 10})
-        self.assertEqual(r.status_code, 200)
-        [rec] = r.json()["reminders"]
-        sent, headers = self.ad.calls[0]
-        self.assertEqual((sent["stop"], sent["destination"], sent["lead_min"]),
-                         ("Lookout Ridge", "the Village", 10))
-        self.assertEqual(headers["X-API-Key"], "k")
-        self.assertEqual(self.client.get(self.url).json()["reminders"], [rec])
-        r = self.post({"action": "cancel", "id": rec["id"]})
-        self.assertEqual(r.json()["reminders"], [])
+        with at(local(2026, 12, 1, 16, 0)), patch.object(worker, "poke") as poke:
+            r = self.post({"action": "add", "departure": "2026-12-01T17:50:00-07:00", "lead_min": 10,
+                           "speakers": [DECK]})
+            self.assertEqual(r.status_code, 200, r.content)
+            [rec] = r.json()["reminders"]
+            self.assertEqual((rec["lead_min"], rec["speakers"], rec["fire_at"]),
+                             (10, [DECK], "2026-12-01T17:40:00-07:00"))
+            self.assertEqual(self.client.get(self.url).json()["reminders"], [rec])
+            r = self.post({"action": "cancel", "id": rec["id"]})
+            self.assertEqual(r.json()["reminders"], [])
+            self.assertEqual(self.post({"action": "cancel", "id": rec["id"]}).status_code, 404)
+        self.assertEqual(poke.call_count, 2)
 
-    def test_rejects_non_departures_bad_leads_and_too_late(self):
+    def test_rejects_non_departures_bad_leads_speakers_and_too_late(self):
+        dep = "2026-12-01T17:50:00-07:00"
         with at(local(2026, 12, 1, 17, 42)):
             for body in ({"action": "add", "departure": "2026-12-01T17:51:00-07:00", "lead_min": 10},
-                         {"action": "add", "departure": "2026-12-01T17:50:00-07:00", "lead_min": 7},
-                         {"action": "add", "departure": "2026-12-01T17:50:00-07:00", "lead_min": "x"},
-                         {"action": "nope"}, {"action": "cancel"}):
+                         {"action": "add", "departure": dep, "lead_min": 7},
+                         {"action": "add", "departure": dep, "lead_min": "x"},
+                         {"action": "add", "departure": dep, "lead_min": 5, "speakers": []},
+                         {"action": "add", "departure": dep, "lead_min": 5, "speakers": ["media_player.x"]},
+                         {"action": "nope"}, {"action": "cancel"}, ["add"]):
                 self.assertEqual(self.post(body).status_code, 400, body)
-            r = self.post({"action": "add", "departure": "2026-12-01T17:50:00-07:00", "lead_min": 10})
+            r = self.post({"action": "add", "departure": dep, "lead_min": 10})
             self.assertEqual(r.status_code, 400)
             self.assertIn("Too late", r.json()["error"])
-            self.assertEqual(self.post({"action": "add", "departure": "2026-12-01T17:50:00-07:00",
-                                        "lead_min": 5}).status_code, 200)
-        self.assertEqual([c[0]["cmd"] for c in self.ad.calls], ["add", "list"])
+            self.assertEqual(self.post({"action": "add", "departure": dep, "lead_min": 5,
+                                        "speakers": "all"}).status_code, 200)
+        self.assertEqual(len(reminders.pending()), 1)
 
-    def test_appdaemon_errors_are_passed_on(self):
-        bad = MagicMock(status_code=400)
-        bad.json.return_value = {"error": "that shuttle has already left"}
-        with at(local(2026, 12, 1, 16, 0)), patch.object(reminders.requests, "post", return_value=bad):
-            r = self.post({"action": "add", "departure": "2026-12-01T17:50:00-07:00", "lead_min": 10})
-        self.assertEqual((r.status_code, r.json()["error"]), (400, "that shuttle has already left"))
-        with patch.object(reminders.requests, "post", side_effect=reminders.requests.ConnectionError()):
-            r = self.client.get(self.url)
-        self.assertEqual(r.status_code, 502)
-        self.assertIn("isn't answering", r.json()["error"])
+    def test_speakers_lists_only_allowed_ones(self):
+        with patch("bdh_sdk.speakers.list_speakers", return_value=LABELS + [("media_player.x", "X")]):
+            r = self.client.get(reverse("shuttle_speakers"))
+        self.assertEqual(r.json()["speakers"], [list(s) for s in LABELS])
+        with patch("bdh_sdk.speakers.list_speakers", side_effect=RuntimeError):
+            r = self.client.get(reverse("shuttle_speakers"))
+        self.assertEqual(r.json()["speakers"], [[DINING, "Dining Room"], [DECK, "Deck"]])
 
-    @override_settings(BDH_SHUTTLE_REMINDERS_URL="")
-    def test_disabled(self):
-        self.assertEqual(self.client.get(self.url).status_code, 404)
+    def test_disabled_without_speakers(self):
+        with patch.dict(os.environ, {"BDH_SHUTTLE_SPEAKERS": ""}):
+            self.assertEqual(self.client.get(self.url).status_code, 404)
+            self.assertEqual(self.client.get(reverse("shuttle_speakers")).status_code, 404)
 
     def test_csrf_required(self):
         from django.test import Client
@@ -301,65 +395,39 @@ class ManifestTests(TestCase):
         from shuttle.plugin import spec
         m = spec.manifest()
         self.assertEqual(m["api_version"], 2)
-        self.assertEqual(m["permissions"], [])
-        self.assertEqual((m["network"], m["lifecycle"], m["memory_mb"]), ("lan", "always", 96))
+        self.assertEqual(sorted(m["permissions"]), ["alerts", "speakers"])
+        self.assertEqual((m["network"], m["lifecycle"], m["memory_mb"]), ("outbound", "always", 96))
         types = {s.key: s.type for s in spec.settings}
-        self.assertEqual(types["reminders_api_key"], "secret")
+        self.assertEqual((types["speakers"], types["volume"], types["chime"]), ("multi", "int", "choice"))
+        self.assertNotIn("reminders_url", types)
 
 
-class BrokerTests(TestCase):
-    """In its container the app reads its settings and the API key from the broker."""
+class BrokerTests(Fresh, TestCase):
+    """In its container the app reads settings and keeps reminders through the broker."""
 
     def setUp(self):
-        from bdh_sdk import rpc
         from bdh_sdk.testing import FakeBroker
 
-        cache.clear()
+        super().setUp()
         # events.subscribe: the hub test process itself subscribes once the RPC is installed.
-        self.broker = FakeBroker(grants=("settings.get", "secrets.get", "events.subscribe"),
+        self.broker = FakeBroker(grants=("settings.get", "state.get", "state.set", "events.subscribe"),
                                  install=True, app_id="shuttle")
         self.broker.start()
         self.addCleanup(self.broker.stop)
-        self.flush = lambda: rpc.flush(5)
-        self.broker.settings[("shuttle", "reminders_url")] = "http://ad.test/bdl_shuttle"
-        self.ad = FakeAppDaemon()
-        p = patch.object(reminders.requests, "post", side_effect=self.ad)
-        p.start()
-        self.addCleanup(p.stop)
+        self.broker.settings[("shuttle", "speakers")] = [DINING]
 
-    def add(self):
+    def test_reminders_kept_in_broker_state(self):
         with at(local(2026, 12, 1, 16, 0)):
-            return self.client.post(reverse("shuttle_reminders"), json.dumps(
+            r = self.client.post(reverse("shuttle_reminders"), json.dumps(
                 {"action": "add", "departure": "2026-12-01T17:50:00-07:00", "lead_min": 10}),
                 content_type="application/json")
-
-    def test_reminder_uses_secret_from_broker(self):
-        self.broker.secrets[("shuttle", "reminders_api_key")] = "vault-key"
-        self.assertEqual(self.add().status_code, 200)
-        self.flush()
-        self.assertEqual(self.ad.calls[0][1]["X-API-Key"], "vault-key")
-        self.assertEqual([p["name"] for p in self.broker.ops("secrets.get")][:1],
-                         ["reminders_api_key"])
-        self.assertIn({"app": "shuttle", "key": "reminders_url"},
-                      [{k: p.get(k) for k in ("app", "key")} for p in self.broker.ops("settings.get")])
-
-    def test_falls_back_to_plain_setting(self):
-        self.broker.settings[("shuttle", "reminders_api_key")] = "plain-key"
-        self.assertEqual(self.add().status_code, 200)
-        self.assertEqual(self.ad.calls[0][1]["X-API-Key"], "plain-key")
-
-    def test_secret_refused_falls_back(self):
-        self.broker.grants = ["settings.get", "events.subscribe"]
-        self.broker.settings[("shuttle", "reminders_api_key")] = "plain-key"
-        with self.assertLogs("shuttle.config", "WARNING"):
-            self.assertEqual(self.add().status_code, 200)
-        self.assertEqual(self.ad.calls[0][1]["X-API-Key"], "plain-key")
+        self.assertEqual(r.status_code, 200, r.content)
+        reminders.reset_cache()
+        self.assertEqual(len(reminders.pending()), 1)
+        self.assertTrue(self.broker.ops("state.set"))
 
 
-class HomepageTests(TestCase):
-    def setUp(self):
-        cache.clear()
-
+class HomepageTests(Fresh, TestCase):
     def test_next_bus(self):
         with at(local(2026, 12, 1, 16, 22)):
             s = homepage_status()
@@ -375,19 +443,15 @@ class HomepageTests(TestCase):
         with at(local(2027, 5, 1, 12)):
             self.assertIsNone(homepage_status())
 
-    @override_settings(**REM)
     def test_pending_reminder(self):
-        ad = FakeAppDaemon()
-        ad.recs.append({"id": "r1", "departure": "2026-12-01T17:50:00-07:00", "lead_min": 10,
-                        "fire_at": "2026-12-01T17:40:00-07:00", "status": "pending"})
-        with at(local(2026, 12, 1, 16, 22)), patch.object(reminders.requests, "post", side_effect=ad):
+        with speakers_on(), at(local(2026, 12, 1, 16, 22)):
+            reminders.add(local(2026, 12, 1, 17, 50), 10)
             s = homepage_status()
         self.assertEqual(s.text, "Reminder set · 5:40 PM")
         self.assertEqual(s.level, "on")
 
 
 @tag("selenium")
-@override_settings(**REM)
 class BrowserTests(StaticLiveServerTestCase):
     NOW = local(2026, 12, 1, 16, 22)
 
@@ -417,12 +481,13 @@ class BrowserTests(StaticLiveServerTestCase):
         from selenium.webdriver.support.ui import WebDriverWait
 
         cache.clear()
-        ad = FakeAppDaemon()
+        reminders.reset_cache()
+        self.addCleanup(reminders.reset_cache)
         # live.py ages fixes against the real clock.
         fix = {"latitude": 50.88300, "longitude": -119.87130, "heading": 0,
                "recorded_at": dt.datetime.now(UTC).isoformat()}
-        with at(self.NOW), patch.object(reminders.requests, "post", side_effect=ad), \
-                patch.object(live, "fetch", return_value=[{"device_data": [fix]}]):
+        with at(self.NOW), speakers_on(), patch.object(live, "fetch", return_value=[{"device_data": [fix]}]), \
+                patch("bdh_sdk.speakers.list_speakers", return_value=LABELS):
             d = self.driver
             d.get(self.live_server_url + reverse("shuttle"))
             wait = WebDriverWait(d, 10)
@@ -441,26 +506,37 @@ class BrowserTests(StaticLiveServerTestCase):
             self.assertEqual(enabled, ["5"])
             self.assertIn("in about 5 minutes", d.find_element(By.ID, "sh-say").text)
             self.assertIn("4:25 PM", d.find_element(By.CSS_SELECTOR, '#sh-leads [data-lead="5"]').text)
+            # Speaker picker: all by default; pick just the deck.
+            wait.until(EC.visibility_of_element_located((By.CSS_SELECTOR, '#sh-spk [data-spk="all"]')))
+            self.assertIn("on", d.find_element(By.CSS_SELECTOR, '#sh-spk [data-spk="all"]').get_attribute("class"))
+            self.assertEqual(d.find_element(By.CSS_SELECTOR, f'#sh-spk [data-spk="{DECK}"]').text, "Deck")
+            d.find_element(By.CSS_SELECTOR, f'#sh-spk [data-spk="{DECK}"]').click()
+            self.assertNotIn("on", d.find_element(By.CSS_SELECTOR, '#sh-spk [data-spk="all"]').get_attribute("class"))
+            self.assertIn("plays once on Deck", d.find_element(By.ID, "sh-where").text)
             d.find_element(By.ID, "sh-ok").click()
             wait.until(EC.invisibility_of_element_located((By.ID, "sh-ov")))
             wait.until(EC.text_to_be_present_in_element((By.ID, "sh-rems"), "4:30 PM shuttle · 5 min heads-up"))
-            self.assertIn("speaker at 4:25 PM", d.find_element(By.ID, "sh-rems").text)
+            self.assertIn("Deck at 4:25 PM", d.find_element(By.ID, "sh-rems").text)
+            self.assertEqual(reminders.pending()[0]["speakers"], [DECK])
             self.assertIn("Reminder set", d.find_element(By.CSS_SELECTOR, "#sh-next .bell").text)
             self.assertIn("on", d.find_element(By.CSS_SELECTOR, '.rb[data-dep$="16:30:00-07:00"]')
                           .get_attribute("class"))
 
-            # A later bus defaults to a 10-minute heads-up.
+            # A later bus defaults to a 10-minute heads-up on all speakers.
             d.find_element(By.CSS_SELECTOR, '.rb[data-dep$="17:50:00-07:00"]').click()
             wait.until(EC.visibility_of_element_located((By.ID, "sh-ov")))
             self.assertIn("on", d.find_element(By.CSS_SELECTOR, '#sh-leads [data-lead="10"]').get_attribute("class"))
+            self.assertIn("on", d.find_element(By.CSS_SELECTOR, '#sh-spk [data-spk="all"]').get_attribute("class"))
             d.find_element(By.ID, "sh-close").click()
 
-            # Reopening the first offers to remove it; the village tab has no bells.
+            # Reopening the first keeps its speaker and offers to remove it; the village tab has no bells.
             d.find_element(By.CSS_SELECTOR, "#sh-next .bell").click()
-            wait.until(EC.visibility_of_element_located((By.ID, "sh-remove"))).click()
+            wait.until(EC.visibility_of_element_located((By.ID, "sh-remove")))
+            self.assertIn("on", d.find_element(By.CSS_SELECTOR, f'#sh-spk [data-spk="{DECK}"]').get_attribute("class"))
+            d.find_element(By.ID, "sh-remove").click()
             wait.until(EC.invisibility_of_element_located((By.ID, "sh-ov")))
             wait.until(lambda drv: not drv.find_elements(By.CSS_SELECTOR, "#sh-rems .sh-rem"))
-            self.assertEqual(ad.recs, [])
+            self.assertEqual(reminders.pending(), [])
             d.find_element(By.CSS_SELECTOR, '.sh-tabs [data-tab="village"]').click()
             self.assertFalse(d.find_elements(By.CSS_SELECTOR, '[data-list="village"] .rb'))
             self.assertTrue(d.find_element(By.CSS_SELECTOR, '[data-list="village"]').is_displayed())

@@ -3,7 +3,7 @@
 BlackDiamondHub plugin app: **Shuttle** — the free Sun Peaks in-resort shuttle
 (East loop) from the Lookout Ridge stop (E7, near the hot tub): next bus,
 the day's timetable both ways, a live map of the bus from skiKrumb, and
-"remind me" announcements on the dining room speaker.
+"remind me" alerts on the hub's screens and speakers.
 
 ## Configuration
 
@@ -11,11 +11,12 @@ the day's timetable both ways, a live map of the bus from skiKrumb, and
 |---|---|---|
 | First day of winter service | `BDH_SHUTTLE_SEASON_START` | `2026-11-21` |
 | Last day of winter service | `BDH_SHUTTLE_SEASON_END` | `2027-04-04` |
-| Reminder service URL | `BDH_SHUTTLE_REMINDERS_URL` | empty (no reminder bells) |
-| Reminder service key (secret) | `BDH_SHUTTLE_REMINDERS_API_KEY` | empty |
+| Speakers reminders may use | `BDH_SHUTTLE_SPEAKERS` | none (no reminder bells) |
+| Reminder volume (0 = leave as is) | `BDH_SHUTTLE_VOLUME` | `50` |
+| Reminder chime | `BDH_SHUTTLE_CHIME` | `soft-bell` |
 | skiKrumb anon key | `BDH_SHUTTLE_SKIKRUMB_KEY` | empty (read from their public embed page) |
 
-All are on the hub's Settings page (the key is a write-only secret).
+All are on the hub's Settings page.
 
 The timetable is the resort's East loop schedule in `shuttle/schedule.py`;
 update it when the resort posts a new season's times. All times are Sun Peaks
@@ -31,48 +32,35 @@ tracker with no position and the map just shows the route.
 
 ## Reminders
 
-Reminders are kept by the `bdl_shuttle` AppDaemon app
-([appdaemon-bdl-shuttle](https://github.com/sslivins/appdaemon-bdl-shuttle)),
-so they still play when nobody has the page open. The hub only validates the
-request (a real departure from Lookout Ridge, a 5/10/15/20-minute lead that
-hasn't passed) and forwards it with the API key; AppDaemon fires the existing
-`announcer` app at the right time. Bells only appear on "From the lodge" — the
-speaker is at the lodge.
+The hub keeps and fires reminders itself (since 2.1.0; before that they lived in
+the `bdl_shuttle` AppDaemon app). A reminder is "N minutes before this bus
+reaches Lookout Ridge": a 5/10/15/20-minute lead for a real departure that
+hasn't passed, at most five at a time, one per bus. They are kept in the app's
+state, so they survive a restart; one that came due while the hub was down
+still plays (with the minutes recomputed) unless the bus has already gone.
 
-For the hub, set:
+When one comes due, a background thread:
 
-```
-BDH_SHUTTLE_REMINDERS_URL=http://192.168.10.217:5050/api/appdaemon/bdl_shuttle
-BDH_SHUTTLE_REMINDERS_API_KEY=<bdl_shuttle api_key from AppDaemon secrets.yaml>
-```
+- pops an alert up on every hub screen (`bdh_sdk.alerts`, `popup/<minutes>/`), and
+- announces it on its speakers (`bdh_sdk.speakers`) with the configured volume and chime.
 
-The key is a secret: set it on the hub's Settings page (it is stored encrypted and
-read with `bdh_sdk.secrets`). A plain `reminders_api_key` setting still works as a fallback.
-
+The admin chooses which speakers reminders may use (`speakers`); a guest picks
+"All speakers" or some of them when setting one. Leave `speakers` empty to hide
+reminders. Night hours don't apply: a guest asked for this one. (The hub still
+keeps the screens' own alert sound quiet during its night window; the speakers
+play.) Bells only appear on "From the lodge".
 ## Container (hub API 2)
 
 Since 2.0.0 the app runs in its own container:
 
-- **permissions**: none — it only reads its own settings and secret through the broker.
-- **network**: `lan` (admin must approve). Reminders go to AppDaemon on the lodge LAN
-  (`192.168.10.217:5050`), which `outbound` refuses as a private address; the live map
-  reads skiKrumb (`app.skikrumb.ca`, `supabase.skikrumb.ca`) over the internet.
-- **lifecycle**: `always`. There is no background thread, but the tile status ("Next 4:30 PM ·
-  8 min", "Reminder set") is minute-accurate and would go stale under `on_demand`'s
-  5-minute minimum wake interval.
+- **permissions**: `alerts` and `speakers`, to fire reminders.
+- **network**: `outbound`; the live map reads skiKrumb (`app.skikrumb.ca`,
+  `supabase.skikrumb.ca`) over the internet.
+- **lifecycle**: `always`: the reminder thread must keep running.
 - **memory_mb**: 96.
 
-In the container the `BDH_SHUTTLE_*` environment variables on the hub are not visible, so the
-admin must set these on the Settings page:
-
-| Key | Kind | Was |
-|---|---|---|
-| `reminders_url` | setting | `BDH_SHUTTLE_REMINDERS_URL` |
-| `reminders_api_key` | secret | `BDH_SHUTTLE_REMINDERS_API_KEY` |
-
-Leave `reminders_url` empty to hide reminders. `season_start`, `season_end` and
-`skikrumb_key` are optional (defaults above). The app keeps nothing in a database, so moving
-between in-process and container needs no migration.
-
+In the container the `BDH_SHUTTLE_*` environment variables on the hub are not visible; set
+`speakers` (and optionally `volume`, `chime`, `season_start`, `season_end`, `skikrumb_key`) on
+the Settings page. Reminders are kept in the app's state through the broker.
 CI's `image` job (from bdh-sdk's `app-ci.yml`) locks the dependencies against the hub's app
 runtime, builds the app's image and smoke-tests it the way the supervisor runs it.

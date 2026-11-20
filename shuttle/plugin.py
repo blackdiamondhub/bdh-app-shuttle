@@ -1,5 +1,9 @@
 from bdh_sdk import PluginSpec, Setting, Tile
-from bdh_sdk.plugins import LIFECYCLE_ALWAYS, NETWORK_LAN, SECRET
+from bdh_sdk.alerts import CHIMES
+from bdh_sdk.plugins import CHOICE, INT, LIFECYCLE_ALWAYS, MULTI, NETWORK_OUTBOUND
+
+CHIME_CHOICES = (("none", "No chime"),) + tuple(
+    (c, c.replace("-", " ").capitalize()) for c in CHIMES)
 
 spec = PluginSpec(
     id="shuttle",
@@ -21,22 +25,25 @@ spec = PluginSpec(
                 help="YYYY-MM-DD."),
         Setting("season_end", "Last day of winter service", default="2027-04-04",
                 help="YYYY-MM-DD."),
-        Setting("reminders_url", "Reminder service URL", default="",
-                help="The bdl_shuttle AppDaemon endpoint, e.g. "
-                     "http://192.168.10.217:5050/api/appdaemon/bdl_shuttle. Empty hides reminders."),
-        Setting("reminders_api_key", "Reminder service key", type=SECRET,
-                help="The bdl_shuttle api_key from AppDaemon's secrets.yaml."),
+        Setting("speakers", "Speakers for reminders", type=MULTI, default=None,
+                choices_from="bdh_sdk.speakers.list_speakers",
+                help="Guests pick from these (or all of them) when they set a reminder. "
+                     "Leave empty to turn reminders off."),
+        Setting("volume", "Reminder volume", type=INT, default=50, minimum=0, maximum=100, unit="%",
+                help="Sonos only. 0 leaves each speaker's volume alone. "
+                     "Speakers return to their own volume afterwards."),
+        Setting("chime", "Reminder chime", type=CHOICE, default="soft-bell", choices=CHIME_CHOICES,
+                help="Played before the announcement."),
         Setting("skikrumb_key", "skiKrumb anon key", default="",
                 help="Empty: read it from skiKrumb's public embed page."),
     ),
     api_version=2,
-    # Nothing from the hub beyond the app's own settings and secrets.
-    permissions=(),
-    # Reminders go to AppDaemon on the lodge LAN (outbound refuses private addresses);
-    # the live map reads skiKrumb over the internet.
-    network=NETWORK_LAN,
-    # The tile shows "Next 4:10 · 3 min" and pending reminders, which go stale at the
-    # 5-minute minimum wake interval of an on_demand app.
+    # A screen alert and a speaker announcement when a reminder comes due.
+    permissions=("alerts", "speakers"),
+    # The live map reads skiKrumb over the internet.
+    network=NETWORK_OUTBOUND,
+    # The ticker plays reminders on time, and the tile shows "Next 4:10 · 3 min",
+    # which would go stale at an on_demand app's 5-minute minimum wake interval.
     lifecycle=LIFECYCLE_ALWAYS,
     memory_mb=96,
 )

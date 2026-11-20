@@ -10,7 +10,7 @@
 {% endblock %}
 
 {% block content %}
-<div class="sh-wrap" id="sh" data-live-url="{% url 'shuttle_live' %}" data-rem-url="{% url 'shuttle_reminders' %}"
+<div class="sh-wrap" id="sh" data-live-url="{% url 'shuttle_live' %}" data-rem-url="{% url 'shuttle_reminders' %}" data-spk-url="{% url 'shuttle_speakers' %}"
      data-season="{{ in_season|yesno:'1,' }}" data-reminders="{{ reminders_on|yesno:'1,' }}">
   {% csrf_token %}
   <div class="sh-mapc">
@@ -82,7 +82,11 @@
     <div class="sh-leads" id="sh-leads">
       {% for n in leads %}<button type="button" data-lead="{{ n }}">{{ n }} min<small></small></button>{% endfor %}
     </div>
-    <div class="sh-prev"><i class="fas fa-volume-high"></i><div><span id="sh-say"></span><div class="w">Plays once on the dining room speaker, over any music.</div></div></div>
+    <div id="sh-spkq" hidden>
+      <div class="q">Where?</div>
+      <div class="sh-spk" id="sh-spk"></div>
+    </div>
+    <div class="sh-prev"><i class="fas fa-volume-high"></i><div><span id="sh-say"></span><div class="w" id="sh-where">Pops up on the screens and plays once on the speakers, over any music.</div></div></div>
     <div class="sh-err" id="sh-err"></div>
     <div class="sh-acts">
       <button type="button" class="c" id="sh-close">Cancel</button>
