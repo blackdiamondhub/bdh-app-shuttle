@@ -32,7 +32,7 @@
   <div class="sh-rail">
     <div class="sh-card" id="sh-next">
       {% if next and not lodge.preview %}
-      <div class="lbl"><i class="fas fa-location-dot"></i>{% if next.today %}Next shuttle{% else %}First shuttle tomorrow{% endif %} · Lookout Ridge stop (out front)</div>
+      <div class="lbl"><i class="fas fa-location-dot"></i>{% if next.today %}Next shuttle{% else %}First shuttle tomorrow{% endif %} · Lookout Ridge stop (near hot tub)</div>
       <div class="sh-nx">
         <div class="t">{{ next.time|slice:":-3" }}<small>{{ next.time|slice:"-2:" }}</small></div>
         <div class="in" data-t="{{ next.iso }}" data-next="1">{% if next.today %}{{ next.rel }}{% endif %}</div>
@@ -42,7 +42,7 @@
       {% else %}
       <div class="lbl"><i class="fas fa-calendar"></i>Winter service</div>
       <div class="sh-nx"><div class="t sm">{{ season_note }}</div></div>
-      <div class="where">Daily, about {{ first_bus }} – {{ last_bus }} from Lookout Ridge (out front). The timetable below is a preview.</div>
+      <div class="where">Daily, about {{ first_bus }} – {{ last_bus }} from Lookout Ridge (near hot tub). The timetable below is a preview.</div>
       {% endif %}
     </div>
 
@@ -77,7 +77,7 @@
 <div class="sh-ov" id="sh-ov" hidden>
   <div class="sh-dlg" role="dialog" aria-modal="true" aria-labelledby="sh-dh">
     <h3 id="sh-dh"><i class="fas fa-bell"></i><span>Remind me about the <span id="sh-dt"></span> shuttle</span></h3>
-    <div class="m">From Lookout Ridge (out front) to the Village</div>
+    <div class="m">From Lookout Ridge (near hot tub) to the Village</div>
     <div class="q">How much warning?</div>
     <div class="sh-leads" id="sh-leads">
       {% for n in leads %}<button type="button" data-lead="{{ n }}">{{ n }} min<small></small></button>{% endfor %}
