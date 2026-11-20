@@ -1,7 +1,7 @@
 # bdh-app-shuttle
 
 BlackDiamondHub plugin app: **Shuttle** — the free Sun Peaks in-resort shuttle
-(East loop) from the Lookout Ridge stop (E7, out front of the lodge): next bus,
+(East loop) from the Lookout Ridge stop (E7, near the hot tub): next bus,
 the day's timetable both ways, a live map of the bus from skiKrumb, and
 "remind me" announcements on the dining room speaker.
 

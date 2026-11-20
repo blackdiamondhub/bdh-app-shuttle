@@ -1,4 +1,4 @@
-"""Shuttle timetable for the Lookout Ridge stop (E7, out front of the lodge).
+"""Shuttle timetable for the Lookout Ridge stop (E7, near the hot tub).
 
 All times are Sun Peaks wall-clock time. BC is on permanent UTC-7 from
 November 2026, so a fixed offset is used rather than a tz database that may
