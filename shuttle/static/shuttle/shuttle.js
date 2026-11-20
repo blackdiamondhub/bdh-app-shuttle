@@ -2,7 +2,7 @@
   "use strict";
   const root = document.getElementById("sh");
   if (!root) return;
-  const LIVE_URL = root.dataset.liveUrl, REM_URL = root.dataset.remUrl;
+  const LIVE_URL = root.dataset.liveUrl, REM_URL = root.dataset.remUrl, SPK_URL = root.dataset.spkUrl;
   const IN_SEASON = !!root.dataset.season, REMINDERS = !!root.dataset.reminders;
   const csrf = (root.querySelector("[name=csrfmiddlewaretoken]") || {}).value || "";
   const geo = JSON.parse(document.getElementById("sh-geo").textContent);
@@ -135,6 +135,11 @@
   let reminders = [];
   let current = null; // {dep, label}
   let lead = 10;
+  let spk = [];       // allowed speakers: [[entity_id, label], ...]
+  let picked = null;  // null: all of them, else entity ids
+  const spkName = (id) => (spk.find((s) => s[0] === id) || [id, id.replace(/^[^.]*\./, "").replace(/_/g, " ")])[1]
+    .replace(/ \((Sonos|Alexa)\)/, "").replace(/ - offline$/, "");
+  const where = (ids) => (!ids ? (spk.length === 1 ? spkName(spk[0][0]) : "All speakers") : ids.map(spkName).join(", "));
 
   const findRem = (iso) => {
     const t = new Date(iso).getTime();
@@ -154,7 +159,7 @@
     $("sh-rems").innerHTML = reminders.map((r) => {
       const dep = new Date(r.departure), fire = new Date(r.fire_at);
       return `<div class="sh-rem"><i class="fas fa-bell"></i><div><div>${hm(dep)} shuttle · ${r.lead_min} min heads-up</div>` +
-        `<div class="s">Dining room speaker at ${hm(fire)}</div></div>` +
+        `<div class="s">${esc(where(r.speakers))} at ${hm(fire)}</div></div>` +
         `<button type="button" class="x" data-cancel="${esc(r.id)}">Cancel</button></div>`;
     }).join("");
   }
@@ -173,6 +178,8 @@
     paint();
   }
   const load = () => api("GET").catch(() => {});
+  const loadSpk = fetch(SPK_URL, { cache: "no-store" }).then((r) => r.json())
+    .then((d) => { spk = d.speakers || []; paint(); }).catch(() => {});
   load();
   setInterval(load, 60000);
 
@@ -207,10 +214,36 @@
     $("sh-err").textContent = "";
     $("sh-remove").hidden = !existing;
     $("sh-ok").textContent = existing ? "Update reminder" : "Set reminder";
+    picked = existing && existing.speakers ? existing.speakers.slice() : null;
     ov.hidden = false;
     refreshLeads();
+    paintSpk();
+    loadSpk.then(() => { if (current && current.dep === dep) paintSpk(); });
   }
   const close = () => { ov.hidden = true; current = null; };
+
+  function paintSpk() {
+    $("sh-spkq").hidden = spk.length < 2;
+    const btn = (id, label, on) =>
+      `<button type="button" data-spk="${esc(id)}" class="${on ? "on" : ""}">${esc(label)}</button>`;
+    $("sh-spk").innerHTML = btn("all", "All speakers", !picked) +
+      spk.map((s) => btn(s[0], spkName(s[0]), !!picked && picked.includes(s[0]))).join("");
+    $("sh-where").textContent = spk.length
+      ? `Pops up on the screens and plays once on ${!picked && spk.length > 1 ? "every reminder speaker" : where(picked)}, over any music.`
+      : "Pops up on the screens and plays once on the speakers, over any music.";
+  }
+  $("sh-spk").addEventListener("click", (e) => {
+    const b = e.target.closest("[data-spk]");
+    if (!b) return;
+    const id = b.dataset.spk;
+    if (id === "all") picked = null;
+    else {
+      const set = new Set(picked || []);
+      set.has(id) ? set.delete(id) : set.add(id);
+      picked = set.size && set.size < spk.length ? spk.map((s) => s[0]).filter((s) => set.has(s)) : null;
+    }
+    paintSpk();
+  });
 
   root.addEventListener("click", (e) => {
     const bell = e.target.closest("[data-dep]");
@@ -242,7 +275,7 @@
     }
   }
   $("sh-ok").addEventListener("click", () => {
-    if (current && lead) submit({ action: "add", departure: current.dep, lead_min: lead }, $("sh-ok"));
+    if (current && lead) submit({ action: "add", departure: current.dep, lead_min: lead, speakers: picked }, $("sh-ok"));
   });
   $("sh-remove").addEventListener("click", () => {
     const r = current && findRem(current.dep);

@@ -80,6 +80,9 @@ body.sh-page{font-family:"Segoe UI",system-ui,sans-serif;color:#e8eef5;overflow:
 .sh-leads button.on{background:#7cc4ff;color:#08131f}
 .sh-leads button.on small{opacity:.75}
 .sh-leads button:disabled{opacity:.25;cursor:default}
+.sh-spk{display:flex;flex-wrap:wrap;gap:10px}
+.sh-spk button{all:unset;padding:12px 18px;border-radius:999px;background:rgba(255,255,255,.07);font-size:17px;cursor:pointer}
+.sh-spk button.on{background:#7cc4ff;color:#08131f}
 .sh-prev{margin-top:26px;padding:16px 18px;border-radius:14px;background:rgba(255,255,255,.05);display:flex;gap:14px;align-items:flex-start;font-size:16px;line-height:1.45}
 .sh-prev i{color:#7cc4ff;font-size:20px;margin-top:3px}
 .sh-prev .w{opacity:.55;font-size:13.5px;margin-top:4px}

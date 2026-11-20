@@ -1,12 +1,11 @@
 """Settings for the shuttle app (``BDH_SHUTTLE_*``)."""
 import datetime as dt
-import logging
 
-from bdh_sdk import secrets
+from bdh_sdk import alerts
+from bdh_sdk.plugins import as_list
 from bdh_sdk.settings import app_setting
 
 APP_ID = "shuttle"
-logger = logging.getLogger(__name__)
 
 
 def _date(key, default):
@@ -29,19 +28,22 @@ def season_end():
     return _date("season_end", dt.date(2027, 4, 4))
 
 
-def reminders_url():
-    """URL of the bdl_shuttle AppDaemon endpoint; empty hides reminders."""
-    return app_setting(APP_ID, "reminders_url", "")
+def speakers():
+    """Speakers reminders may use (entity ids). None set hides reminders."""
+    return as_list(app_setting(APP_ID, "speakers", None))
 
 
-def reminders_api_key():
-    """The bdl_shuttle API key: the app's secret, else the old plain setting."""
-    try:
-        key = secrets.get("reminders_api_key", "", app=APP_ID)
-    except Exception:  # noqa: BLE001 - broker unreachable or refused
-        logger.warning("reading the reminders_api_key secret failed", exc_info=True)
-        key = ""
-    return key or app_setting(APP_ID, "reminders_api_key", "")
+def volume():
+    """Announcement volume (0-100), or None to leave each speaker's volume alone."""
+    v = app_setting(APP_ID, "volume", 0, cast=int)
+    return v if v and 0 < v <= 100 else None
+
+def chime():
+    """Chime before the announcement, or None for none."""
+    value = app_setting(APP_ID, "chime", "soft-bell")
+    if value == alerts.SILENT:
+        return None
+    return value if value in alerts.CHIMES else "soft-bell"
 
 
 def skikrumb_key():

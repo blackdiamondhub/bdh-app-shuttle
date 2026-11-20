@@ -1,56 +1,181 @@
-"""Client for the bdl_shuttle AppDaemon app, which keeps the reminders and
-plays them on the dining room speaker even when nobody has this page open."""
-import requests
-from django.core.cache import cache
+"""Shuttle reminders, kept by the hub itself.
 
-from . import config
+A reminder is one-off: "``lead_min`` minutes before the <departure> bus
+reaches Lookout Ridge, say so". The hub runs one server process, so a
+module-level list under a lock is the source of truth; every change is written
+through to ``app_state`` so reminders survive a restart. The ticker in
+:mod:`shuttle.worker` calls :func:`tick` and plays whatever came due.
+
+A reminder that comes due late (e.g. after a restart) still plays, with the
+minutes recomputed, as long as the bus is at least ``MIN_LEFT_S`` away;
+otherwise it is dropped. Fired reminders are forgotten.
+
+``speakers`` is ``None`` for every speaker the admin allows (worked out when
+the reminder fires) or a list of entity ids picked from them.
+"""
+import datetime as dt
+import logging
+import secrets
+import threading
+
+from bdh_sdk.storage import app_state
+
+from . import config, schedule
+
+log = logging.getLogger(__name__)
 
 STOP = "Lookout Ridge"
 DESTINATION = "the Village"
-PENDING_CACHE = "shuttle:reminders"
+MESSAGE = ("Heads up! The shuttle to {destination} reaches {stop} "
+           "in about {minutes}. Time to put your boots on!")
+MAX_ACTIVE = 5
+MIN_LEFT_S = 60
+
+_lock = threading.RLock()
+_recs = None
 
 
 def enabled():
-    return bool(config.reminders_url())
+    """Reminders are on once the admin has allowed at least one speaker."""
+    return bool(config.speakers())
 
 
-def call(cmd, timeout=10, **fields):
-    """POST a command. Returns (payload, error, http_status)."""
-    body = {"cmd": cmd}
-    body.update({k: v for k, v in fields.items() if v is not None})
-    try:
-        r = requests.post(config.reminders_url(), json=body, timeout=timeout,
-                          headers={"X-API-Key": config.reminders_api_key()})
-    except requests.RequestException:
-        return None, "The lodge speaker system isn't answering. Try again in a minute.", 502
-    try:
-        data = r.json()
-    except ValueError:
-        return None, f"Bad response from the lodge controller (HTTP {r.status_code})", 502
-    if r.status_code != 200:
-        msg = data.get("error") if isinstance(data, dict) else None
-        return None, msg or f"HTTP {r.status_code}", (400 if r.status_code == 400 else 502)
-    if cmd in ("add", "cancel", "clear"):
-        cache.delete(PENDING_CACHE)
-    return data, None, 200
+def _state():
+    return app_state(config.APP_ID)
 
 
-def add(departure, lead_min):
-    return call("add", departure=departure.isoformat(), lead_min=lead_min,
-                stop=STOP, destination=DESTINATION)
+def _load():
+    global _recs
+    if _recs is None:
+        raw = _state().get("reminders") or []
+        _recs = [r for r in raw if isinstance(r, dict) and r.get("id") and r.get("departure")]
+    return _recs
 
 
-def cancel(rid):
-    return call("cancel", id=rid)
+def _save():
+    _state().set("reminders", _recs)
+
+
+def reset_cache():
+    """Forget the in-memory copy (tests, or after the state store changes)."""
+    global _recs
+    with _lock:
+        _recs = None
+
+
+def _now(now):
+    return (now or schedule.local_now()).timestamp()
+
+
+def _fire_ts(r):
+    return r["departure"] - r["lead_min"] * 60
+
+
+def _iso(ts):
+    return dt.datetime.fromtimestamp(ts, schedule.LOCAL).isoformat(timespec="seconds")
+
+
+def view(r):
+    return {"id": r["id"], "departure": _iso(r["departure"]), "fire_at": _iso(_fire_ts(r)),
+            "lead_min": r["lead_min"], "speakers": r.get("speakers")}
+
+
+def minutes_phrase(n):
+    return "1 minute" if n == 1 else f"{n} minutes"
+
+
+def message(minutes):
+    return MESSAGE.format(destination=DESTINATION, stop=STOP, minutes=minutes_phrase(minutes))
+
+
+def clean_speakers(value, allowed):
+    """``None`` (all allowed speakers) or the picked ones, which must be allowed."""
+    if value is None or value == "all":
+        return None
+    if not isinstance(value, (list, tuple)) or not value:
+        raise ValueError("Pick at least one speaker.")
+    picked = list(dict.fromkeys(value))
+    if any(s not in allowed for s in picked):
+        raise ValueError("That speaker isn't available for reminders.")
+    return picked
+
+
+def targets(r, allowed=None):
+    """Speakers to announce ``r`` on: its own picks that are still allowed, or all allowed."""
+    allowed = config.speakers() if allowed is None else allowed
+    own = r.get("speakers")
+    return list(allowed) if own is None else [s for s in own if s in allowed]
 
 
 def pending():
-    """Pending reminders (cached briefly), [] on any error."""
-    if not enabled():
-        return []
-    items = cache.get(PENDING_CACHE)
-    if items is None:
-        data, err, _ = call("list", timeout=3)
-        items = (data or {}).get("reminders", []) if not err else []
-        cache.set(PENDING_CACHE, items, 30)
-    return items
+    """Pending reminders as dicts for the page and tile, soonest first."""
+    with _lock:
+        return [view(r) for r in sorted(_load(), key=_fire_ts)]
+
+
+def add(departure, lead_min, speakers=None, now=None):
+    """Remind ``lead_min`` minutes before ``departure`` (an aware datetime).
+
+    Setting one for a bus that already has a reminder updates it. Raises
+    ValueError with a message for the guest.
+    """
+    picked = clean_speakers(speakers, config.speakers())
+    now_ts = _now(now)
+    dep = departure.timestamp()
+    if dep - lead_min * 60 <= now_ts:
+        raise ValueError(f"Too late for a {lead_min}-minute heads-up.")
+    with _lock:
+        recs = _load()
+        rec = next((r for r in recs if r["departure"] == dep), None)
+        if rec is None:
+            if len(recs) >= MAX_ACTIVE:
+                raise ValueError(f"You can have up to {MAX_ACTIVE} reminders at once.")
+            rec = {"id": secrets.token_hex(4), "departure": dep, "created": now_ts}
+            recs.append(rec)
+        rec.update(lead_min=lead_min, speakers=picked)
+        _save()
+        log.info("shuttle reminder %s set: %s bus, %d min before", rec["id"], _iso(dep), lead_min)
+        return view(rec)
+
+
+def cancel(rid):
+    """Cancel reminder ``rid``; False if there is no such reminder."""
+    with _lock:
+        recs = _load()
+        keep = [r for r in recs if r["id"] != rid]
+        if len(keep) == len(recs):
+            return False
+        recs[:] = keep
+        _save()
+        return True
+
+
+def tick(now=None):
+    """Take the reminders that are due. Returns ``[(reminder, minutes_left)]`` to play."""
+    now_ts = _now(now)
+    due, out = [], []
+    with _lock:
+        recs = _load()
+        for r in recs:
+            if _fire_ts(r) <= now_ts:
+                due.append(r)
+        if not due:
+            return []
+        recs[:] = [r for r in recs if r not in due]
+        _save()
+    for r in due:
+        left = r["departure"] - now_ts
+        if left < MIN_LEFT_S:
+            log.warning("shuttle reminder %s skipped: the %s bus already left", r["id"], _iso(r["departure"]))
+        else:
+            out.append((r, max(1, round(left / 60))))
+    return out
+
+
+def next_wake(now=None):
+    """Seconds until the next reminder is due, or None if there are none."""
+    with _lock:
+        recs = _load()
+        if not recs:
+            return None
+        return max(0.0, min(_fire_ts(r) for r in recs) - _now(now))

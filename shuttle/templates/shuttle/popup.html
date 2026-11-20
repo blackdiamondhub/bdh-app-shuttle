@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Shuttle in {{ minutes }}</title>
+{% comment %}Shown inside the hub's alert pop-up (16:9 iframe). Static: nothing animates.{% endcomment %}
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    color: #eef3fa; background: radial-gradient(ellipse 110% 90% at 30% 20%, #22314d 0%, #101722 60%, #07090d 100%); }
+  .w { height: 100%; display: flex; align-items: center; justify-content: center; gap: 6vw; padding: 0 6vw; box-sizing: border-box; }
+  .ic { flex: none; font-size: 40vh; color: #7cc4ff; }
+  .side { display: flex; flex-direction: column; gap: 2.6vh; min-width: 0; }
+  p { margin: 0; color: #ffb35c; font-size: 3.4vh; letter-spacing: .12em; font-weight: 600; }
+  h1 { margin: 0; font-size: 9vh; font-weight: 300; line-height: 1.1; }
+  .to { font-size: 4.4vh; color: #c9d6e8; }
+  .boots { font-size: 3.6vh; color: #8fa3bf; }
+</style>
+</head>
+<body>
+<div class="w">
+  <i class="ic fa-solid fa-bus"></i>
+  <div class="side">
+    <p>SHUTTLE REMINDER</p>
+    <h1 id="title">Shuttle in {{ minutes }}</h1>
+    <div class="to">To {{ destination }} from {{ stop }}</div>
+    <div class="boots">Time to put your boots on!</div>
+  </div>
+</div>
+</body>
+</html>
