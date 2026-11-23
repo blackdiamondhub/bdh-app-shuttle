@@ -29,8 +29,11 @@ The resort does not publish a return arrival at the Village: the bus continues
 around the remaining East loop stops, so the app does not invent one.
 All displayed times are Sun Peaks wall-clock time, fixed UTC−7.
 Stop numbers follow the resort's [2026/27 stop map](https://www.sunpeaksresort.com/sites/default/files/2026-11/VillageMap_2026-27_WEB.png),
-with E6 highlighted as our stop and all E1–E10 codes visible. Map pins are
-approximate street positions, not surveyed stop-sign coordinates.
+with E6 highlighted as our stop and all E1–E10 codes visible. Pins include
+locally confirmed stop coordinates; curbside pins are not snapped to the
+road-centre-line route. E4 is labelled P5 Entrance and E5 Switchback Creek.
+The route stays on the main road at E8 (not into Settlers Crossing) and
+passes E10 on Village Way without a detour up Village Place.
 E4–E7 share the same published timetable column, so correcting our stop to E6
 does not change reminder times.
 

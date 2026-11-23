@@ -166,18 +166,23 @@ class LiveTests(TestCase):
         self.assertFalse(s["buses"][0]["at_our_stop"])
 
     def test_at_our_stop(self):
-        with patch.object(live, "fetch", return_value=[self.marker(50.88512, -119.86467)]):
+        with patch.object(live, "fetch", return_value=[self.marker(50.884889981815334, -119.8647617402362)]):
             self.assertTrue(live.status()["buses"][0]["at_our_stop"])
 
     def test_corrected_official_stop_positions_and_e7_is_not_our_stop(self):
-        points = (("E4", 50.882554, -119.866334), ("E5", 50.882704, -119.862778),
-                  ("E6", 50.88512, -119.86467), ("E7", 50.88345, -119.86200),
-                  ("E8", 50.883206, -119.867700), ("E10", 50.885722, -119.878521))
+        points = (("E1", 50.884250910130966, -119.8781202809673),
+                  ("E2", 50.8838549240345, -119.87570532056989),
+                  ("E3", 50.882981745393366, -119.87266369552958),
+                  ("E4", 50.882554, -119.866334), ("E5", 50.882704, -119.862778),
+                  ("E6", 50.884889981815334, -119.8647617402362),
+                  ("E7", 50.88345, -119.86200), ("E8", 50.883206, -119.867700),
+                  ("E9", 50.88367244784997, -119.87362588960312),
+                  ("E10", 50.88465648796544, -119.8783275104009))
         for code, lat, lon in points:
             with self.subTest(code=code):
                 stop, distance = stops.nearest(lat, lon)
                 self.assertEqual(stop["id"], code)
-                self.assertLess(distance, 30)
+                self.assertLess(distance, 1)
                 cache.clear()
                 with patch.object(live, "fetch", return_value=[self.marker(lat, lon)]):
                     bus = live.status()["buses"][0]
@@ -210,7 +215,19 @@ class LiveTests(TestCase):
         self.assertGreater(len(route), 50)
         for s in stops.STOPS:
             near = min(stops.distance_m(s["lat"], s["lon"], a, b) for a, b in route)
-            self.assertLess(near, 40, s["id"])
+            self.assertLess(near, 50, s["id"])  # curbside pins need not lie on the road centre line
+
+    def test_route_skips_settlers_crossing_and_northern_village_place(self):
+        route = stops.route()
+        self.assertEqual(route[0], route[-1])
+        self.assertNotIn([50.88471, -119.877593], route)
+        self.assertNotIn([50.885722, -119.878521], route)
+        self.assertNotIn([50.883319, -119.867698], route)
+        at_e8 = [i for i, point in enumerate(route) if point == [50.883206, -119.8677]]
+        self.assertEqual(len(at_e8), 2)
+        for i in at_e8:
+            self.assertEqual({tuple(route[i - 1]), tuple(route[i + 1])},
+                             {(50.883196, -119.868128), (50.883096, -119.867149)})
 
 
 class PageTests(Fresh, TestCase):
@@ -230,6 +247,7 @@ class PageTests(Fresh, TestCase):
         self.assertNotContains(r, "arrives Village Day Lodge")
         self.assertContains(r, "Shuttle (live)")
         self.assertContains(r, "Lookout Ridge")
+        self.assertNotContains(r, "Free in-resort shuttle")
         self.assertNotContains(r, "Remind me")  # no speakers allowed yet
         geo = json.loads(r.content.decode().split('id="sh-geo" type="application/json">')[1].split("</script>")[0])
         self.assertEqual(geo["our"], "E6")
@@ -713,9 +731,18 @@ class BrowserTests(StaticLiveServerTestCase):
             self.assertIn("E6 Lookout Ridge · our stop",
                           d.find_element(By.CSS_SELECTOR, ".sh-our .sh-slab").text)
             labels = [e.text for e in d.find_elements(By.CSS_SELECTOR, ".sh-slab")]
-            for code in ("E2", "E4", "E8", "E9"):
+            for code in ("E2", "E8", "E9"):
                 self.assertIn(code, labels)
+            self.assertIn("E4 P5 Entrance", labels)
+            self.assertIn("E5 Switchback Creek", labels)
             self.assertIn("E10 Ice Rink", labels)
+            self.assertTrue(d.execute_script("""
+                const labels = [...document.querySelectorAll('.sh-slab')];
+                const first = labels.find(el => el.textContent === 'E1 Village Place').getBoundingClientRect();
+                const last = labels.find(el => el.textContent === 'E10 Ice Rink').getBoundingClientRect();
+                return first.right <= last.left || last.right <= first.left ||
+                       first.bottom <= last.top || last.bottom <= first.top;
+            """), "The relocated E1 and E10 labels overlap")
 
             def offset(selector):
                 return d.execute_script("""
