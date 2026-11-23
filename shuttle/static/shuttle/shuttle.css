@@ -70,7 +70,6 @@ body.sh-page{font-family:"Segoe UI",system-ui,sans-serif;color:#e8eef5;overflow:
 .sh-rem i.fa-bell{color:#7cc4ff;font-size:20px}
 .sh-rem .s{opacity:.65;font-size:14px}
 .sh-rem .x{all:unset;margin-left:auto;padding:8px 14px;border-radius:999px;background:rgba(255,255,255,.08);font-size:14px;cursor:pointer}
-.sh-foot{font-size:12.5px;opacity:.45;line-height:1.5;flex:none}
 
 .sh-ov{position:fixed;inset:0;background:rgba(0,0,0,.6);backdrop-filter:blur(6px);display:grid;place-items:center;z-index:2000}
 .sh-ov[hidden]{display:none}
