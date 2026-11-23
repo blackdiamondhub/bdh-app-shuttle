@@ -18,6 +18,9 @@ the day's timetable both ways, a live map of the bus from skiKrumb, and
 
 All are on the hub's Settings page.
 
+While the Shuttle page is open, it keeps the display awake, like Cameras.
+Leaving the page restores the display's normal idle behavior.
+
 The timetable is the resort's East loop schedule in `shuttle/schedule.py`;
 update it when the resort posts a new season's times. All times are Sun Peaks
 wall-clock time, fixed UTC−7.
@@ -49,6 +52,11 @@ The admin chooses which speakers reminders may use (`speakers`); a guest picks
 reminders. Night hours don't apply: a guest asked for this one. (The hub still
 keeps the screens' own alert sound quiet during its night window; the speakers
 play.) Bells only appear on "From the lodge".
+
+When upgrading from AppDaemon reminders, set `speakers` to the speakers the
+old announcer used. The old `reminders_url` setting does not enable native
+reminders; without a saved speaker selection, notification controls stay hidden.
+
 ## Container (hub API 2)
 
 Since 2.0.0 the app runs in its own container:

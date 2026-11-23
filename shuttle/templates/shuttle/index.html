@@ -5,6 +5,7 @@
 {% block body_class %}sh-page{% endblock %}
 
 {% block extra_head %}
+<meta name="bdh-screensaver" content="off">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <link rel="stylesheet" href="{% static 'shuttle/shuttle.css' %}">
 {% endblock %}
@@ -100,4 +101,11 @@
 {{ geo|json_script:"sh-geo" }}
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="{% static 'shuttle/shuttle.js' %}"></script>
+<script>
+window.addEventListener('DOMContentLoaded', () => {
+  if (!window.bdh) return;
+  window.bdh.send('activity');
+  setInterval(() => window.bdh.send('activity'), 30000);
+});
+</script>
 {% endblock %}
