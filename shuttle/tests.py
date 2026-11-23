@@ -187,6 +187,12 @@ class LiveTests(TestCase):
 
 
 class PageTests(Fresh, TestCase):
+    def test_shuttle_opts_out_of_screensaver_in_and_out_of_season(self):
+        for now in (local(2026, 12, 1, 16, 22), local(2026, 11, 3, 12)):
+            with at(now):
+                r = self.client.get(reverse("shuttle"))
+            self.assertContains(r, '<meta name="bdh-screensaver" content="off">')
+
     def test_in_season_page(self):
         with at(local(2026, 12, 1, 16, 22)):
             r = self.client.get(reverse("shuttle"))
@@ -416,6 +422,15 @@ class BrokerTests(Fresh, TestCase):
         self.addCleanup(self.broker.stop)
         self.broker.settings[("shuttle", "speakers")] = [DINING]
 
+    def test_saved_speaker_configuration_restores_guest_controls(self):
+        with at(local(2026, 12, 1, 16, 22)):
+            r = self.client.get(reverse("shuttle"))
+        self.assertContains(r, "Remind me")
+        self.assertContains(r, 'id="sh-spk"')
+        with patch("bdh_sdk.speakers.list_speakers", return_value=LABELS):
+            r = self.client.get(reverse("shuttle_speakers"))
+        self.assertEqual(r.json()["speakers"], [list(LABELS[0])])
+
     def test_reminders_kept_in_broker_state(self):
         with at(local(2026, 12, 1, 16, 0)):
             r = self.client.post(reverse("shuttle_reminders"), json.dumps(
@@ -474,6 +489,34 @@ class BrowserTests(StaticLiveServerTestCase):
     def tearDownClass(cls):
         cls.driver.quit()
         super().tearDownClass()
+
+    def test_activity_heartbeat_survives_missing_map_library(self):
+        script = """
+            window.shActivity = [];
+            window.shIntervals = [];
+            window.addEventListener('DOMContentLoaded', () => {
+              window.bdh = {send: type => window.shActivity.push(type)};
+            });
+            const interval = window.setInterval;
+            window.setInterval = (fn, delay, ...args) => {
+              if (delay === 30000) window.shIntervals.push(fn);
+              return interval(fn, delay, ...args);
+            };
+        """
+        d = self.driver
+        hook = d.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {"source": script})
+        d.execute_cdp_cmd("Network.enable", {})
+        d.execute_cdp_cmd("Network.setBlockedURLs", {"urls": ["*unpkg.com*"]})
+        try:
+            with at(self.NOW), patch.object(live, "status", return_value={"ok": True, "buses": []}):
+                d.get(self.live_server_url + reverse("shuttle"))
+                self.assertTrue(d.execute_script("return typeof L === 'undefined'"))
+                self.assertEqual(d.execute_script("return window.shActivity"), ["activity"])
+                d.execute_script("window.shIntervals.forEach(fn => fn())")
+                self.assertEqual(d.execute_script("return window.shActivity"), ["activity", "activity"])
+        finally:
+            d.execute_cdp_cmd("Network.setBlockedURLs", {"urls": []})
+            d.execute_cdp_cmd("Page.removeScriptToEvaluateOnNewDocument", {"identifier": hook["identifier"]})
 
     def test_live_bus_and_reminder_flow(self):
         from selenium.webdriver.common.by import By
