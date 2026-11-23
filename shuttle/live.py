@@ -117,7 +117,7 @@ def parse(markers):
 def _describe(bus, now):
     stop, metres = stops.nearest(bus["lat"], bus["lon"])
     return {**bus, "age_s": max(0, int(now - bus["at"])),
-            "near": stop["name"] if metres <= NEAR_M else "",
+            "near": f"{stop['id']} {stop['name']}" if metres <= NEAR_M else "",
             "at_our_stop": stop["id"] == stops.OUR_STOP and metres <= 60}
 
 

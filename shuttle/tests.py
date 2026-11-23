@@ -162,13 +162,27 @@ class LiveTests(TestCase):
         self.assertTrue(s["ok"])
         self.assertFalse(s["stale"])
         self.assertEqual(len(s["buses"]), 1)
-        self.assertEqual(s["buses"][0]["near"], "Orient Chair")
+        self.assertEqual(s["buses"][0]["near"], "E3 Skier Underpass")
         self.assertFalse(s["buses"][0]["at_our_stop"])
 
     def test_at_our_stop(self):
-        e7 = next(s for s in stops.STOPS if s["id"] == "E7")
-        with patch.object(live, "fetch", return_value=[self.marker(e7["lat"], e7["lon"])]):
+        with patch.object(live, "fetch", return_value=[self.marker(50.88512, -119.86467)]):
             self.assertTrue(live.status()["buses"][0]["at_our_stop"])
+
+    def test_corrected_official_stop_positions_and_e7_is_not_our_stop(self):
+        points = (("E4", 50.882554, -119.866334), ("E5", 50.882704, -119.862778),
+                  ("E6", 50.88512, -119.86467), ("E7", 50.88345, -119.86200),
+                  ("E8", 50.883206, -119.867700), ("E10", 50.885722, -119.878521))
+        for code, lat, lon in points:
+            with self.subTest(code=code):
+                stop, distance = stops.nearest(lat, lon)
+                self.assertEqual(stop["id"], code)
+                self.assertLess(distance, 30)
+                cache.clear()
+                with patch.object(live, "fetch", return_value=[self.marker(lat, lon)]):
+                    bus = live.status()["buses"][0]
+                self.assertTrue(bus["near"].startswith(code + " "))
+                self.assertEqual(bus["at_our_stop"], code == "E6")
 
     def test_falls_back_to_last_good_when_feed_fails(self):
         with patch.object(live, "fetch", return_value=[self.marker()]):
@@ -218,7 +232,8 @@ class PageTests(Fresh, TestCase):
         self.assertContains(r, "Lookout Ridge")
         self.assertNotContains(r, "Remind me")  # no speakers allowed yet
         geo = json.loads(r.content.decode().split('id="sh-geo" type="application/json">')[1].split("</script>")[0])
-        self.assertEqual(geo["our"], "E7")
+        self.assertEqual(geo["our"], "E6")
+        self.assertEqual([s["id"] for s in geo["stops"]], ["VDL"] + [f"E{i}" for i in range(1, 11)])
 
     def test_reminder_bells_only_from_the_lodge(self):
         with at(local(2026, 12, 1, 16, 37)), speakers_on():
@@ -236,6 +251,8 @@ class PageTests(Fresh, TestCase):
         self.assertContains(r, "Shuttle not running")
         self.assertNotContains(r, "Shuttle (live)")
         self.assertNotContains(r, "data-t=")
+        self.assertContains(r, 'id="sh-find" disabled')
+        self.assertContains(r, "Show route")
 
     def test_live_api(self):
         with patch.object(live, "status", return_value={"ok": True, "stale": False, "buses": []}):
@@ -577,18 +594,20 @@ class BrowserTests(StaticLiveServerTestCase):
         from selenium.webdriver.support.ui import WebDriverWait
 
         cache.clear()
+        self.addCleanup(cache.clear)
         reminders.reset_cache()
         self.addCleanup(reminders.reset_cache)
-        # live.py ages fixes against the real clock.
         fix = {"latitude": 50.88300, "longitude": -119.87130, "heading": 0,
-               "recorded_at": dt.datetime.now(UTC).isoformat()}
+               "recorded_at": self.NOW.isoformat()}
         with at(self.NOW), speakers_on(), patch.object(live, "fetch", return_value=[{"device_data": [fix]}]), \
+                patch.object(live, "time") as clock, \
                 patch("bdh_sdk.speakers.list_speakers", return_value=LABELS):
+            clock.time.return_value = self.NOW.timestamp()
             d = self.driver
             d.get(self.live_server_url + reverse("shuttle"))
             wait = WebDriverWait(d, 10)
             wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "#sh-map .sh-bus")))
-            wait.until(EC.text_to_be_present_in_element((By.ID, "sh-ls"), "Near Orient Chair"))
+            wait.until(EC.text_to_be_present_in_element((By.ID, "sh-ls"), "Near E3 Skier Underpass"))
             self.assertEqual(len(d.find_elements(By.CSS_SELECTOR, "#sh-map .sh-our")), 1)
             # Nothing on the page scrolls at 1920x1080.
             self.assertFalse(d.execute_script(
@@ -639,6 +658,161 @@ class BrowserTests(StaticLiveServerTestCase):
             d.find_element(By.CSS_SELECTOR, '.sh-tabs [data-tab="village"]').click()
             self.assertFalse(d.find_elements(By.CSS_SELECTOR, '[data-list="village"] .rb'))
             self.assertTrue(d.find_element(By.CSS_SELECTOR, '[data-list="village"]').is_displayed())
+
+    def live_probe(self):
+        script = """
+            (() => {
+            window.shLive = {ok: true, stale: false, buses: [{
+              lat: 50.883, lon: -119.8713, at: %s, age_s: 1,
+              near: 'E3 Skier Underpass', at_our_stop: false
+            }]};
+            window.shElapsed = 0;
+            window.shHttpError = false;
+            Date.now = () => %s + window.shElapsed;
+            window.shTimers = {};
+            const interval = window.setInterval;
+            window.setInterval = (fn, delay, ...args) => {
+              if (document.currentScript && document.currentScript.src.includes('/shuttle/shuttle.js') &&
+                  [1000, 10000].includes(delay)) {
+                (window.shTimers[delay] ||= []).push(fn);
+                return 0;
+              }
+              return interval(fn, delay, ...args);
+            };
+            const fetch = window.fetch;
+            window.fetch = (url, options) => {
+              if (new URL(url, location.href).pathname === %s)
+                return Promise.resolve({ok: !window.shHttpError, status: window.shHttpError ? 503 : 200,
+                  json: async () => structuredClone(window.shLive)});
+              return fetch(url, options);
+            };
+            })();
+        """ % (self.NOW.timestamp() - 1, int(self.NOW.timestamp() * 1000),
+               json.dumps(reverse("shuttle_live")))
+        hook = self.driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {"source": script})
+        self.addCleanup(lambda: self.driver.execute_cdp_cmd("Page.removeScriptToEvaluateOnNewDocument",
+                                                           {"identifier": hook["identifier"]}))
+
+    def poll_live_probe(self):
+        self.assertIs(self.driver.execute_async_script("""
+            const done = arguments[0];
+            window.shTimers[10000][0]().then(() => done(true), e => done(String(e)));
+        """), True)
+
+    def test_map_buttons_center_without_follow_and_restore_route(self):
+        from selenium.webdriver.common.by import By
+        from selenium.webdriver.support.ui import WebDriverWait
+
+        self.live_probe()
+        d = self.driver
+        with at(self.NOW):
+            d.get(self.live_server_url + reverse("shuttle"))
+            wait = WebDriverWait(d, 10)
+            wait.until(lambda drv: drv.find_elements(By.CSS_SELECTOR, ".sh-bus") and
+                       drv.find_element(By.ID, "sh-find").is_enabled())
+            self.assertIn("E6 Lookout Ridge · our stop",
+                          d.find_element(By.CSS_SELECTOR, ".sh-our .sh-slab").text)
+            labels = [e.text for e in d.find_elements(By.CSS_SELECTOR, ".sh-slab")]
+            for code in ("E2", "E4", "E8", "E9"):
+                self.assertIn(code, labels)
+            self.assertIn("E10 Ice Rink", labels)
+
+            def offset(selector):
+                return d.execute_script("""
+                    const map = document.getElementById('sh-map').getBoundingClientRect();
+                    const marker = document.querySelector(arguments[0]).getBoundingClientRect();
+                    return [marker.x + marker.width / 2 - map.x - map.width / 2,
+                            marker.y + marker.height / 2 - map.y - map.height / 2];
+                """, selector)
+
+            original = offset(".sh-our")
+            d.find_element(By.ID, "sh-find").click()
+            for axis in offset(".sh-bus"):
+                self.assertAlmostEqual(axis, 0, delta=2)
+            centered = offset(".sh-our")
+            d.execute_script("window.shLive.buses[0].lat = 50.88; window.shLive.buses[0].lon = -119.86")
+            self.poll_live_probe()
+            for a, b in zip(centered, offset(".sh-our")):
+                self.assertAlmostEqual(a, b, delta=2)  # new fixes must not pan the user's map
+            self.assertGreater(max(map(abs, offset(".sh-bus"))), 100)
+            d.find_element(By.ID, "sh-route").click()
+            for a, b in zip(original, offset(".sh-our")):
+                self.assertAlmostEqual(a, b, delta=2)
+
+            d.execute_script("""
+                window.shLive.buses.push({...window.shLive.buses[0], lat: 50.883, lon: -119.8713});
+            """)
+            self.poll_live_probe()
+            self.assertEqual(d.find_element(By.ID, "sh-find").text, "Find shuttles")
+            d.find_element(By.ID, "sh-find").click()
+            self.assertTrue(d.execute_script("""
+                const map = document.getElementById('sh-map').getBoundingClientRect();
+                return [...document.querySelectorAll('.sh-bus')].every(el => {
+                  const r = el.getBoundingClientRect();
+                  return r.left >= map.left && r.right <= map.right &&
+                         r.top >= map.top && r.bottom <= map.bottom;
+                });
+            """))
+            d.execute_script("window.shLive.buses = []")
+            self.poll_live_probe()
+            self.assertFalse(d.find_element(By.ID, "sh-find").is_enabled())
+            self.assertFalse(d.find_elements(By.CSS_SELECTOR, ".sh-bus"))
+            self.assertTrue(d.find_element(By.ID, "sh-route").is_enabled())
+            d.find_element(By.ID, "sh-route").click()
+            for a, b in zip(original, offset(".sh-our")):
+                self.assertAlmostEqual(a, b, delta=2)
+
+            d.set_window_size(390, 844)
+            try:
+                self.assertTrue(d.execute_script("""
+                    const map = document.querySelector('.sh-mapc').getBoundingClientRect();
+                    return [...document.querySelectorAll('.sh-map-actions button')].every(el => {
+                      const r = el.getBoundingClientRect();
+                      return r.height >= 44 && r.left >= map.left && r.right <= map.right &&
+                             r.top >= map.top && r.bottom <= map.bottom;
+                    }) && document.scrollingElement.scrollWidth <= innerWidth;
+                """))
+            finally:
+                d.set_window_size(1920, 1080)
+
+    def test_gps_age_ticks_without_cached_polls_resetting_it_or_failed_feed_claiming_live(self):
+        from selenium.webdriver.common.by import By
+        from selenium.webdriver.support.ui import WebDriverWait
+
+        self.live_probe()
+        d = self.driver
+        with at(self.NOW):
+            d.get(self.live_server_url + reverse("shuttle"))
+            WebDriverWait(d, 10).until(lambda drv: drv.find_element(By.ID, "sh-ls").text.endswith(" · Live"))
+            d.execute_script("window.shElapsed = 14000; window.shTimers[1000][0]()")
+            self.assertTrue(d.find_element(By.ID, "sh-ls").text.endswith(" · Live"))  # 15 seconds old
+            d.execute_script("window.shElapsed = 15000; window.shTimers[1000][0]()")
+            self.assertIn("Last position 16 s ago", d.find_element(By.ID, "sh-ls").text)
+            self.assertIn("off", d.find_element(By.ID, "sh-live").get_attribute("class"))
+            self.assertTrue(d.find_elements(By.CSS_SELECTOR, ".sh-bus.stale"))
+            self.poll_live_probe()  # same GPS timestamp, even though age_s is still 1 in cached JSON
+            self.assertIn("Last position 16 s ago", d.find_element(By.ID, "sh-ls").text)
+            d.execute_script("window.shElapsed = 30000; window.shTimers[1000][0]()")
+            self.assertIn("Last position 31 s ago", d.find_element(By.ID, "sh-ls").text)
+            d.execute_script("window.shLive.buses[0].at = Date.now() / 1000 - 1")
+            self.poll_live_probe()
+            self.assertTrue(d.find_element(By.ID, "sh-ls").text.endswith(" · Live"))
+            self.assertFalse(d.find_elements(By.CSS_SELECTOR, ".sh-bus.stale"))
+            d.execute_script("window.shLive.stale = true")
+            self.poll_live_probe()
+            self.assertIn("Last position 1 s ago", d.find_element(By.ID, "sh-ls").text)
+            self.assertIn("off", d.find_element(By.ID, "sh-live").get_attribute("class"))
+            d.execute_script("""
+                window.shLive.stale = false;
+                window.shLive.buses.push({...window.shLive.buses[0], at: Date.now() / 1000 - 25});
+            """)
+            self.poll_live_probe()
+            self.assertIn("Oldest position 25 s ago", d.find_element(By.ID, "sh-ls").text)
+            self.assertEqual(len(d.find_elements(By.CSS_SELECTOR, ".sh-bus.stale")), 1)
+            d.execute_script("window.shHttpError = true")
+            self.poll_live_probe()
+            self.assertEqual(d.find_element(By.ID, "sh-lt").text, "Live location unavailable")
+            self.assertFalse(d.find_element(By.ID, "sh-find").is_enabled())
 
 
 class HubFrameLayoutTests(TestCase):

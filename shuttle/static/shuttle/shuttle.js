@@ -35,8 +35,8 @@
     const code = s.id;
     const ours = code === geo.our;
     const name = ours ? `${code} ${s.name} · our stop` : `${code === "VDL" ? "" : code + " "}${s.name}`;
-    const side = !ours && s.label === "left" ? " left" : "";
-    const label = ours || s.label ? `<span class="sh-slab${side}">${esc(name)}</span>` : "";
+    const side = !ours && (s.side === "left" || s.label === "left") ? " left" : "";
+    const label = `<span class="sh-slab${side}">${esc(ours || s.label ? name : code)}</span>`;
     const size = ours ? 30 : 16;
     L.marker([s.lat, s.lon], {
       zIndexOffset: ours ? 500 : 0,
@@ -47,14 +47,28 @@
     }).bindTooltip(esc(name)).addTo(map);
   });
   // Labels hang off to the right of their stops; leave room for them.
-  const mw = document.getElementById("sh-map").clientWidth;
-  map.fitBounds(L.latLngBounds(route), {
-    paddingTopLeft: [Math.round(mw * 0.03), 70],
-    paddingBottomRight: [Math.min(220, Math.round(mw * 0.18)), 50],
-  });
+  function showRoute() {
+    const mw = $("sh-map").clientWidth;
+    map.fitBounds(L.latLngBounds(route), {
+      paddingTopLeft: [Math.round(mw * 0.03), 70],
+      paddingBottomRight: [Math.min(220, Math.round(mw * 0.18)), 50],
+      animate: false,
+    });
+  }
+  showRoute();
+  $("sh-route").disabled = false;
+  $("sh-route").addEventListener("click", showRoute);
 
   // ---- live bus --------------------------------------------------------
   const buses = new Map();
+  let liveData = null;
+  $("sh-find").addEventListener("click", () => {
+    const positions = Array.from(buses.values(), (marker) => marker.getLatLng());
+    if (positions.length === 1) map.setView(positions[0], Math.max(map.getZoom(), 16), { animate: false });
+    else if (positions.length > 1) map.fitBounds(L.latLngBounds(positions), {
+      padding: [60, 60], maxZoom: 16, animate: false,
+    });
+  });
   function busIcon(stale) {
     return L.divIcon({
       className: "", html: `<div class="sh-bus${stale ? " stale" : ""}"><i class="fas fa-bus-simple"></i></div>`,
@@ -70,13 +84,47 @@
     $("sh-ls").textContent = sub || "";
     $("sh-live").classList.toggle("off", !!off);
   }
+  function positionAge(bus) {
+    return Number.isFinite(bus.at) ? Math.max(0, Date.now() / 1000 - bus.at) : null;
+  }
+  function paintLive() {
+    if (!liveData) return;
+    const data = liveData, positions = data.buses || [];
+    const healthy = data.ok && !data.stale;
+    positions.forEach((bus, i) => {
+      const age = positionAge(bus);
+      const marker = buses.get(bus.id || String(i));
+      const element = marker && marker.getElement();
+      if (element) element.querySelector(".sh-bus").classList.toggle("stale", !healthy || age === null || age > 15);
+    });
+    $("sh-find").disabled = !positions.length;
+    $("sh-find").querySelector("span").textContent = positions.length > 1 ? "Find shuttles" : "Find shuttle";
+    $("sh-find").title = positions.length ? "Center on the last reported shuttle position" : "No shuttle position is available";
+    const b = positions[0];
+    if (b) {
+      const ages = positions.map(positionAge);
+      const known = ages.every((age) => age !== null);
+      const age = known ? Math.max(...ages) : null;
+      const fresh = healthy && known && age <= 15;
+      const where = b.at_our_stop ? "At Lookout Ridge now" : (b.near ? `Near ${b.near}` : "On the East loop");
+      const freshness = fresh ? "Live" : (known ? `${positions.length > 1 ? "Oldest position" : "Last position"} ${ago(age)}` : "Position time unavailable");
+      setLive(positions.length > 1 ? `${positions.length} shuttles running` : "East shuttle",
+              `${where} · ${freshness}`, !fresh);
+    } else if (!data.ok || data.stale) {
+      setLive("Live location unavailable", "The timetable still applies", true);
+    } else {
+      setLive("No shuttle on the road right now", "Live location shows when a bus is running", true);
+    }
+  }
   async function pollLive() {
     let data;
     try {
       const r = await fetch(LIVE_URL, { cache: "no-store" });
+      if (!r.ok) throw new Error(`Live shuttle request failed: HTTP ${r.status}`);
       data = await r.json();
     } catch (e) {
-      data = { ok: false, buses: [] };
+      console.warn("Live shuttle location unavailable", e);
+      data = { ok: false, stale: true, buses: [] };
     }
     const seen = new Set();
     (data.buses || []).forEach((b, i) => {
@@ -84,27 +132,20 @@
       seen.add(key);
       const ll = [b.lat, b.lon];
       if (buses.has(key)) {
-        buses.get(key).setLatLng(ll).setIcon(busIcon(data.stale));
+        buses.get(key).setLatLng(ll);
       } else {
         buses.set(key, L.marker(ll, { zIndexOffset: 1000, icon: busIcon(data.stale) }).addTo(map));
       }
     });
     for (const [key, m] of buses) if (!seen.has(key)) { m.remove(); buses.delete(key); }
 
-    const b = (data.buses || [])[0];
-    if (b) {
-      const where = b.at_our_stop ? "At Lookout Ridge now" : (b.near ? `Near ${b.near}` : "On the East loop");
-      setLive(data.buses.length > 1 ? `${data.buses.length} shuttles running` : "East shuttle",
-              `${where} · updated ${ago(b.age_s)}`, data.stale);
-    } else if (!data.ok) {
-      setLive("Live location unavailable", "The timetable still applies", true);
-    } else {
-      setLive("No shuttle on the road right now", "Live location shows when a bus is running", true);
-    }
+    liveData = data;
+    paintLive();
   }
   if (IN_SEASON) {
     pollLive();
     setInterval(pollLive, 10000);
+    setInterval(paintLive, 1000);
   }
 
   // ---- tabs + relative times ------------------------------------------
