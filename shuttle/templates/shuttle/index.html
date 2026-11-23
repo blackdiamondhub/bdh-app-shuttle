@@ -39,7 +39,7 @@
         <div class="in" data-t="{{ next.iso }}" data-next="1">{% if next.today %}{{ next.rel }}{% endif %}</div>
         {% if reminders_on %}<button type="button" class="bell" data-dep="{{ next.iso }}" data-label="{{ next.time }}"><i class="fas fa-bell"></i>Remind me</button>{% endif %}
       </div>
-      <div class="where">To the Village · arrives Village Day Lodge ~{{ next.village }}</div>
+      <div class="where">To the Village via the remaining East loop stops</div>
       {% else %}
       <div class="lbl"><i class="fas fa-calendar"></i>Winter service</div>
       <div class="sh-nx"><div class="t sm">{{ season_note }}</div></div>
@@ -48,10 +48,10 @@
     </div>
 
     <div class="sh-card sh-deps">
-      <div class="lbl"><i class="fas fa-clock"></i>Departures{% if lodge.tomorrow %} · tomorrow{% endif %}</div>
+      <div class="lbl"><i class="fas fa-clock"></i>Scheduled stop times{% if lodge.tomorrow %} · tomorrow{% endif %}</div>
       <div class="sh-tabs" role="tablist">
-        <button type="button" class="on" data-tab="lodge">From the lodge</button>
-        <button type="button" data-tab="village">Back from the Village</button>
+        <button type="button" class="on" data-tab="lodge">Lookout Ridge pickup</button>
+        <button type="button" data-tab="village">From Village Day Lodge</button>
       </div>
       {% for key, b in boards %}
       <div class="sh-list" data-list="{{ key }}"{% if not forloop.first %} hidden{% endif %}>
@@ -60,7 +60,7 @@
           {% else %}
           <div class="sh-row{% if r.past %} past{% endif %}">
             <div class="tm">{{ r.time }}</div>
-            <div class="rel"{% if not r.past and not b.preview and not b.tomorrow %} data-t="{{ r.iso }}"{% endif %}>{% if r.past %}departed{% else %}{{ r.rel }}{% endif %}{% if r.arrive and not r.past %}<span class="arr">at the lodge ~{{ r.arrive }}</span>{% endif %}{% if r.last %} <span class="tag">Last bus</span>{% endif %}</div>
+            <div class="rel"{% if not r.past and not b.preview and not b.tomorrow %} data-t="{{ r.iso }}"{% endif %}>{% if r.past %}scheduled time passed{% else %}{{ r.rel }}{% endif %}{% if r.arrive and not r.past %}<span class="arr">Lookout Ridge ~{{ r.arrive }}</span>{% endif %}{% if r.last %} <span class="tag">Last bus</span>{% endif %}</div>
             {% if r.remind and reminders_on %}<button type="button" class="rb" data-dep="{{ r.iso }}" data-label="{{ r.time }}" aria-label="Remind me about the {{ r.time }} shuttle"><i class="far fa-bell"></i></button>{% endif %}
           </div>
           {% endif %}
@@ -70,7 +70,7 @@
       <div id="sh-rems"></div>
     </div>
 
-    <div class="sh-foot">Free in-resort shuttle · runs daily in the winter season. Times are approximate. Live location by skiKrumb.<br>Questions? Guest Services 250-578-5474</div>
+    <div class="sh-foot">Free in-resort shuttle · times are Sun Peaks local and approximate. <a href="{{ timetable.source_page }}" target="_blank" rel="noopener">{{ timetable.season }} timetable</a>, verified {{ timetable.verified_on }}. Live location by skiKrumb.<br>Questions? Guest Services 250-578-5474</div>
   </div>
 </div>
 

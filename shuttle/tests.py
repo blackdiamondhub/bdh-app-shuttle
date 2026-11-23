@@ -53,36 +53,48 @@ class Fresh:
 
 class ScheduleTests(TestCase):
     def test_board_starts_at_last_departed_bus(self):
-        with at(local(2026, 12, 1, 16, 22)):
+        with at(local(2026, 12, 1, 16, 37)):
             b = schedule.board(schedule.LODGE)
         self.assertFalse(b["preview"] or b["tomorrow"])
         rows = b["rows"]
-        self.assertEqual(rows[0]["time"], "3:30 PM")
+        self.assertEqual(rows[0]["time"], "3:45 PM")
         self.assertTrue(rows[0]["past"])
         self.assertFalse(rows[0]["remind"])
         self.assertEqual(rows[1]["rel"], "in 8 min")
         self.assertTrue(rows[1]["remind"])
         self.assertEqual(rows[2]["rel"], "in 1 h 28 min")
         self.assertTrue(rows[-1]["last"])
-        self.assertIn("No service 7:10 – 7:50", times(b))
+        self.assertIn("No service 7:30 – 8:10", times(b))
 
     def test_no_reminder_inside_the_minimum_lead(self):
-        with at(local(2026, 12, 1, 16, 27)):
+        with at(local(2026, 12, 1, 16, 42)):
             row = schedule.board(schedule.LODGE)["rows"][1]
-        self.assertEqual(row["time"], "4:30 PM")
+        self.assertEqual(row["time"], "4:45 PM")
         self.assertFalse(row["remind"])
 
     def test_breaks_sit_between_the_right_buses(self):
         with at(local(2026, 12, 1, 6)):
             got = times(schedule.board(schedule.LODGE))
-        self.assertEqual(got[:4], ["8:30 AM", "9:30 AM", "No service 10:00 – 10:40", "11:30 AM"])
-        self.assertEqual(got.index("No service 2:00 – 2:40"), got.index("1:30 PM") + 1)
+        self.assertEqual(got[:4], ["8:45 AM", "9:45 AM", "No service 10:20 – 11:00", "11:45 AM"])
+        self.assertEqual(got.index("No service 2:20 – 3:00"), got.index("1:45 PM") + 1)
 
     def test_village_tab_has_arrival_and_no_reminders(self):
         with at(local(2026, 12, 1, 6)):
             rows = [r for r in schedule.board(schedule.VILLAGE)["rows"] if "time" in r]
-        self.assertEqual((rows[0]["time"], rows[0]["arrive"]), ("8:20 AM", "8:30 AM"))
+        self.assertEqual((rows[0]["time"], rows[0]["arrive"]), ("8:40 AM", "8:45 AM"))
         self.assertFalse(any(r["remind"] for r in rows))
+
+    def test_afternoon_pickup_and_departure_are_not_return_arrivals(self):
+        with at(local(2026, 12, 1, 13, 35)):
+            nxt = schedule.next_departure()
+            village = schedule.board(schedule.VILLAGE)["rows"]
+        self.assertEqual(nxt["time"], "1:45 PM")
+        self.assertNotIn("village", nxt)
+        row = next(r for r in village if r.get("time") == "1:40 PM")
+        self.assertEqual(row["arrive"], "1:45 PM")
+        with patch.dict(schedule.TIMES, {schedule.VILLAGE: ("08:40",), schedule.LODGE: ("08:57",)}):
+            row = schedule.board(schedule.VILLAGE, now=local(2026, 12, 1, 6))["rows"][0]
+        self.assertEqual(row["arrive"], "8:57 AM")  # paired stop time, not a fixed ride estimate
 
     def test_after_last_bus_shows_tomorrow(self):
         with at(local(2026, 12, 1, 22)):
@@ -92,7 +104,7 @@ class ScheduleTests(TestCase):
         self.assertEqual(b["day"], dt.date(2026, 12, 2))
         self.assertEqual(b["rows"][0]["rel"], "")
         self.assertTrue(b["rows"][0]["remind"])
-        self.assertEqual((nxt["time"], nxt["today"]), ("8:30 AM", False))
+        self.assertEqual((nxt["time"], nxt["today"]), ("8:45 AM", False))
 
     def test_off_season_is_a_preview(self):
         with at(local(2026, 11, 3, 12)):
@@ -116,10 +128,11 @@ class ScheduleTests(TestCase):
             self.assertEqual(schedule.season_note(), "Done for the season")
 
     def test_is_departure(self):
-        self.assertEqual(schedule.is_departure("2026-12-01T16:30:00-07:00"),
-                         dt.datetime(2026, 12, 1, 16, 30, tzinfo=LOCAL))
-        self.assertIsNotNone(schedule.is_departure("2026-12-01T23:30:00+00:00"))
-        for bad in ("2026-12-01T16:31:00-07:00", "2026-12-01T16:30:00", "2026-11-01T16:30:00-07:00",
+        self.assertEqual(schedule.is_departure("2026-12-01T16:45:00-07:00"),
+                         dt.datetime(2026, 12, 1, 16, 45, tzinfo=LOCAL))
+        self.assertIsNotNone(schedule.is_departure("2026-12-01T23:45:00+00:00"))
+        for bad in ("2026-12-01T16:30:00-07:00", "2026-12-01T16:46:00-07:00",
+                    "2026-12-01T16:45:00", "2026-11-01T16:45:00-07:00",
                     "nope", None):
             self.assertIsNone(schedule.is_departure(bad), bad)
 
@@ -188,16 +201,19 @@ class LiveTests(TestCase):
 
 class PageTests(Fresh, TestCase):
     def test_shuttle_opts_out_of_screensaver_in_and_out_of_season(self):
-        for now in (local(2026, 12, 1, 16, 22), local(2026, 11, 3, 12)):
+        for now in (local(2026, 12, 1, 16, 37), local(2026, 11, 3, 12)):
             with at(now):
                 r = self.client.get(reverse("shuttle"))
             self.assertContains(r, '<meta name="bdh-screensaver" content="off">')
 
     def test_in_season_page(self):
-        with at(local(2026, 12, 1, 16, 22)):
+        with at(local(2026, 12, 1, 16, 37)):
             r = self.client.get(reverse("shuttle"))
         self.assertContains(r, "Next shuttle")
-        self.assertContains(r, 'data-t="2026-12-01T16:30:00-07:00"')
+        self.assertContains(r, 'data-t="2026-12-01T16:45:00-07:00"')
+        self.assertContains(r, "To the Village via the remaining East loop stops")
+        self.assertContains(r, "Lookout Ridge pickup")
+        self.assertNotContains(r, "arrives Village Day Lodge")
         self.assertContains(r, "Shuttle (live)")
         self.assertContains(r, "Lookout Ridge")
         self.assertNotContains(r, "Remind me")  # no speakers allowed yet
@@ -205,11 +221,11 @@ class PageTests(Fresh, TestCase):
         self.assertEqual(geo["our"], "E7")
 
     def test_reminder_bells_only_from_the_lodge(self):
-        with at(local(2026, 12, 1, 16, 22)), speakers_on():
+        with at(local(2026, 12, 1, 16, 37)), speakers_on():
             r = self.client.get(reverse("shuttle"))
         self.assertContains(r, "Remind me")
-        self.assertContains(r, 'class="rb" data-dep="2026-12-01T16:30:00-07:00"')
-        self.assertNotContains(r, 'data-dep="2026-12-01T16:20:00-07:00"')
+        self.assertContains(r, 'class="rb" data-dep="2026-12-01T16:45:00-07:00"')
+        self.assertNotContains(r, 'data-dep="2026-12-01T16:40:00-07:00"')
         self.assertContains(r, 'id="sh-ov"')
         self.assertContains(r, 'id="sh-spk"')
 
@@ -234,7 +250,7 @@ class PageTests(Fresh, TestCase):
 
 
 class ReminderStoreTests(Fresh, TestCase):
-    DEP = local(2026, 12, 1, 17, 50)
+    DEP = local(2026, 12, 1, 18, 5)
     NOW = local(2026, 12, 1, 16, 0)
 
     def setUp(self):
@@ -246,7 +262,7 @@ class ReminderStoreTests(Fresh, TestCase):
     def test_add_update_cancel_and_survive_restart(self):
         r = reminders.add(self.DEP, 10, now=self.NOW)
         self.assertEqual((r["departure"], r["fire_at"], r["speakers"]),
-                         ("2026-12-01T17:50:00-07:00", "2026-12-01T17:40:00-07:00", None))
+                         ("2026-12-01T18:05:00-07:00", "2026-12-01T17:55:00-07:00", None))
         again = reminders.add(self.DEP, 5, [DECK], now=self.NOW)  # same bus: updated, not added
         self.assertEqual(again["id"], r["id"])
         reminders.reset_cache()  # as if the hub restarted
@@ -259,7 +275,7 @@ class ReminderStoreTests(Fresh, TestCase):
 
     def test_rejects_too_late_too_many_and_bad_speakers(self):
         with self.assertRaisesRegex(ValueError, "Too late for a 10-minute"):
-            reminders.add(self.DEP, 10, now=local(2026, 12, 1, 17, 40))
+            reminders.add(self.DEP, 10, now=local(2026, 12, 1, 17, 55))
         for bad in ([], ["media_player.garage"], "kitchen"):
             with self.assertRaises(ValueError, msg=bad):
                 reminders.add(self.DEP, 10, bad, now=self.NOW)
@@ -272,17 +288,17 @@ class ReminderStoreTests(Fresh, TestCase):
         a = reminders.add(self.DEP, 10, now=self.NOW)
         b = reminders.add(self.DEP + dt.timedelta(hours=1), 10, now=self.NOW)
         c = reminders.add(self.DEP + dt.timedelta(hours=2), 10, now=self.NOW)
-        self.assertEqual(reminders.next_wake(self.NOW), 100 * 60)
-        self.assertEqual(reminders.tick(local(2026, 12, 1, 17, 39)), [])
+        self.assertEqual(reminders.next_wake(self.NOW), 115 * 60)
+        self.assertEqual(reminders.tick(local(2026, 12, 1, 17, 54)), [])
         # Both came due while the hub was down: a's bus has gone (dropped), b's is 3 minutes out.
         with self.assertLogs("shuttle.reminders", "WARNING"):
-            due = reminders.tick(local(2026, 12, 1, 18, 47))
+            due = reminders.tick(local(2026, 12, 1, 19, 2))
         self.assertEqual([(r["id"], m) for r, m in due], [(b["id"], 3)])
         self.assertNotIn(a["id"], [r["id"] for r in reminders.pending()])
         self.assertEqual([r["id"] for r in reminders.pending()], [c["id"]])
         # Missed by more than the bus: dropped, not played.
         with self.assertLogs("shuttle.reminders", "WARNING"):
-            self.assertEqual(reminders.tick(local(2026, 12, 1, 19, 50)), [])
+            self.assertEqual(reminders.tick(local(2026, 12, 1, 20, 5)), [])
         reminders.reset_cache()
         self.assertEqual(reminders.pending(), [])
 
@@ -291,6 +307,42 @@ class ReminderStoreTests(Fresh, TestCase):
         self.assertEqual(reminders.targets({"speakers": [DECK]}), [DECK])
         with patch.dict(os.environ, {"BDH_SHUTTLE_SPEAKERS": DINING}):
             self.assertEqual(reminders.targets({"speakers": [DECK]}), [])  # deck no longer allowed
+
+    def test_old_reminders_are_retimed_once_preserving_choices(self):
+        old = {"id": "saved", "departure": local(2026, 12, 1, 17, 50).timestamp(),
+               "lead_min": 15, "speakers": [DECK], "created": self.NOW.timestamp()}
+        current = {**old, "id": "current", "departure": local(2026, 12, 1, 18, 45).timestamp()}
+        app_state("shuttle").set("reminders", [old, current])
+        with self.assertLogs("shuttle.reminders", "INFO"):
+            pending = reminders.pending()
+        self.assertEqual([r["id"] for r in pending], ["saved", "current"])
+        self.assertEqual([r["departure"] for r in pending],
+                         ["2026-12-01T18:05:00-07:00", "2026-12-01T18:45:00-07:00"])
+        self.assertEqual([r["fire_at"] for r in pending],
+                         ["2026-12-01T17:50:00-07:00", "2026-12-01T18:30:00-07:00"])
+        self.assertTrue(all(r["speakers"] == [DECK] for r in pending))
+        reminders.reset_cache()
+        self.assertEqual(reminders.pending(), pending)
+        self.assertEqual(reminders.tick(local(2026, 12, 1, 17, 49)), [])
+        self.assertEqual(len(reminders.tick(local(2026, 12, 1, 17, 50))), 1)
+
+    def test_migration_does_not_shift_unknown_times_and_retries_failed_save(self):
+        old = {"id": "saved", "departure": local(2026, 12, 1, 17, 50).timestamp(),
+               "lead_min": 10, "speakers": None}
+        odd = {**old, "id": "odd", "departure": old["departure"] + 30}
+        app_state("shuttle").set("reminders", [old, odd])
+        store = MagicMock()
+        store.get.return_value = [old, odd]
+        store.set.side_effect = RuntimeError("state unavailable")
+        with patch.object(reminders, "_state", return_value=store), self.assertRaises(RuntimeError):
+            reminders.pending()
+        self.assertIsNone(reminders._recs)
+        self.assertEqual(old["departure"], local(2026, 12, 1, 17, 50).timestamp())
+        pending = reminders.pending()
+        self.assertEqual(next(r for r in pending if r["id"] == "saved")["departure"],
+                         "2026-12-01T18:05:00-07:00")
+        self.assertEqual(next(r for r in pending if r["id"] == "odd")["departure"],
+                         "2026-12-01T17:50:30-07:00")
 
 
 class WorkerTests(Fresh, TestCase):
@@ -347,12 +399,12 @@ class ReminderApiTests(Fresh, TestCase):
 
     def test_add_list_cancel(self):
         with at(local(2026, 12, 1, 16, 0)), patch.object(worker, "poke") as poke:
-            r = self.post({"action": "add", "departure": "2026-12-01T17:50:00-07:00", "lead_min": 10,
+            r = self.post({"action": "add", "departure": "2026-12-01T18:05:00-07:00", "lead_min": 10,
                            "speakers": [DECK]})
             self.assertEqual(r.status_code, 200, r.content)
             [rec] = r.json()["reminders"]
             self.assertEqual((rec["lead_min"], rec["speakers"], rec["fire_at"]),
-                             (10, [DECK], "2026-12-01T17:40:00-07:00"))
+                             (10, [DECK], "2026-12-01T17:55:00-07:00"))
             self.assertEqual(self.client.get(self.url).json()["reminders"], [rec])
             r = self.post({"action": "cancel", "id": rec["id"]})
             self.assertEqual(r.json()["reminders"], [])
@@ -360,9 +412,10 @@ class ReminderApiTests(Fresh, TestCase):
         self.assertEqual(poke.call_count, 2)
 
     def test_rejects_non_departures_bad_leads_speakers_and_too_late(self):
-        dep = "2026-12-01T17:50:00-07:00"
-        with at(local(2026, 12, 1, 17, 42)):
-            for body in ({"action": "add", "departure": "2026-12-01T17:51:00-07:00", "lead_min": 10},
+        dep = "2026-12-01T18:05:00-07:00"
+        with at(local(2026, 12, 1, 17, 57)):
+            for body in ({"action": "add", "departure": "2026-12-01T18:06:00-07:00", "lead_min": 10},
+                         {"action": "add", "departure": "2026-12-01T17:50:00-07:00", "lead_min": 10},
                          {"action": "add", "departure": dep, "lead_min": 7},
                          {"action": "add", "departure": dep, "lead_min": "x"},
                          {"action": "add", "departure": dep, "lead_min": 5, "speakers": []},
@@ -423,7 +476,7 @@ class BrokerTests(Fresh, TestCase):
         self.broker.settings[("shuttle", "speakers")] = [DINING]
 
     def test_saved_speaker_configuration_restores_guest_controls(self):
-        with at(local(2026, 12, 1, 16, 22)):
+        with at(local(2026, 12, 1, 16, 37)):
             r = self.client.get(reverse("shuttle"))
         self.assertContains(r, "Remind me")
         self.assertContains(r, 'id="sh-spk"')
@@ -434,7 +487,7 @@ class BrokerTests(Fresh, TestCase):
     def test_reminders_kept_in_broker_state(self):
         with at(local(2026, 12, 1, 16, 0)):
             r = self.client.post(reverse("shuttle_reminders"), json.dumps(
-                {"action": "add", "departure": "2026-12-01T17:50:00-07:00", "lead_min": 10}),
+                {"action": "add", "departure": "2026-12-01T18:05:00-07:00", "lead_min": 10}),
                 content_type="application/json")
         self.assertEqual(r.status_code, 200, r.content)
         reminders.reset_cache()
@@ -444,31 +497,31 @@ class BrokerTests(Fresh, TestCase):
 
 class HomepageTests(Fresh, TestCase):
     def test_next_bus(self):
-        with at(local(2026, 12, 1, 16, 22)):
+        with at(local(2026, 12, 1, 16, 37)):
             s = homepage_status()
-        self.assertEqual(s.text, "Next 4:30 PM · 8 min")
+        self.assertEqual(s.text, "Next 4:45 PM · 8 min")
 
     def test_first_bus_tomorrow_and_off_season(self):
         with at(local(2026, 12, 1, 22)):
-            self.assertEqual(homepage_status().text, "First bus 8:30 AM")
+            self.assertEqual(homepage_status().text, "First bus 8:45 AM")
         with at(local(2026, 11, 20, 12)):
-            self.assertEqual(homepage_status().text, "First bus 8:30 AM")
+            self.assertEqual(homepage_status().text, "First bus 8:45 AM")
         with at(local(2026, 11, 3, 12)):
             self.assertEqual(homepage_status().text, "Not running · back Nov 21")
         with at(local(2027, 5, 1, 12)):
             self.assertIsNone(homepage_status())
 
     def test_pending_reminder(self):
-        with speakers_on(), at(local(2026, 12, 1, 16, 22)):
-            reminders.add(local(2026, 12, 1, 17, 50), 10)
+        with speakers_on(), at(local(2026, 12, 1, 16, 37)):
+            reminders.add(local(2026, 12, 1, 18, 5), 10)
             s = homepage_status()
-        self.assertEqual(s.text, "Reminder set · 5:40 PM")
+        self.assertEqual(s.text, "Reminder set · 5:55 PM")
         self.assertEqual(s.level, "on")
 
 
 @tag("selenium")
 class BrowserTests(StaticLiveServerTestCase):
-    NOW = local(2026, 12, 1, 16, 22)
+    NOW = local(2026, 12, 1, 16, 37)
 
     @classmethod
     def setUpClass(cls):
@@ -541,14 +594,14 @@ class BrowserTests(StaticLiveServerTestCase):
             self.assertFalse(d.execute_script(
                 "return document.scrollingElement.scrollHeight > innerHeight"))
 
-            # 4:30 bus, 8 minutes out: only the 5-minute heads-up is still possible.
+            # 4:45 bus, 8 minutes out: only the 5-minute heads-up is still possible.
             d.find_element(By.CSS_SELECTOR, "#sh-next .bell").click()
             wait.until(EC.visibility_of_element_located((By.ID, "sh-ov")))
             enabled = [b.get_attribute("data-lead") for b in d.find_elements(By.CSS_SELECTOR, "#sh-leads button")
                        if b.is_enabled()]
             self.assertEqual(enabled, ["5"])
             self.assertIn("in about 5 minutes", d.find_element(By.ID, "sh-say").text)
-            self.assertIn("4:25 PM", d.find_element(By.CSS_SELECTOR, '#sh-leads [data-lead="5"]').text)
+            self.assertIn("4:40 PM", d.find_element(By.CSS_SELECTOR, '#sh-leads [data-lead="5"]').text)
             # Speaker picker: all by default; pick just the deck.
             wait.until(EC.visibility_of_element_located((By.CSS_SELECTOR, '#sh-spk [data-spk="all"]')))
             self.assertIn("on", d.find_element(By.CSS_SELECTOR, '#sh-spk [data-spk="all"]').get_attribute("class"))
@@ -561,15 +614,15 @@ class BrowserTests(StaticLiveServerTestCase):
                        or drv.find_element(By.ID, "sh-err").text)
             self.assertEqual(d.find_element(By.ID, "sh-err").text, "")
             wait.until(EC.invisibility_of_element_located((By.ID, "sh-ov")))
-            wait.until(EC.text_to_be_present_in_element((By.ID, "sh-rems"), "4:30 PM shuttle · 5 min heads-up"))
-            self.assertIn("Deck at 4:25 PM", d.find_element(By.ID, "sh-rems").text)
+            wait.until(EC.text_to_be_present_in_element((By.ID, "sh-rems"), "4:45 PM shuttle · 5 min heads-up"))
+            self.assertIn("Deck at 4:40 PM", d.find_element(By.ID, "sh-rems").text)
             self.assertEqual(reminders.pending()[0]["speakers"], [DECK])
             self.assertIn("Reminder set", d.find_element(By.CSS_SELECTOR, "#sh-next .bell").text)
-            self.assertIn("on", d.find_element(By.CSS_SELECTOR, '.rb[data-dep$="16:30:00-07:00"]')
+            self.assertIn("on", d.find_element(By.CSS_SELECTOR, '.rb[data-dep$="16:45:00-07:00"]')
                           .get_attribute("class"))
 
             # A later bus defaults to a 10-minute heads-up on all speakers.
-            d.find_element(By.CSS_SELECTOR, '.rb[data-dep$="17:50:00-07:00"]').click()
+            d.find_element(By.CSS_SELECTOR, '.rb[data-dep$="18:05:00-07:00"]').click()
             wait.until(EC.visibility_of_element_located((By.ID, "sh-ov")))
             self.assertIn("on", d.find_element(By.CSS_SELECTOR, '#sh-leads [data-lead="10"]').get_attribute("class"))
             self.assertIn("on", d.find_element(By.CSS_SELECTOR, '#sh-spk [data-spk="all"]').get_attribute("class"))
