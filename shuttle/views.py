@@ -24,6 +24,7 @@ def index(request):
         "boards": [(schedule.LODGE, lodge),
                    (schedule.VILLAGE, schedule.board(schedule.VILLAGE, now))],
         "reminders_on": reminders.enabled(),
+        "timetable": config.TIMETABLE,
         "leads": schedule.LEADS,
         "geo": {"stops": stops.STOPS, "route": stops.route(), "our": stops.OUR_STOP},
     })

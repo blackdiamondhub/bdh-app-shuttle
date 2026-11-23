@@ -1,0 +1,25 @@
+{
+  "season": "2026/27",
+  "season_start": "2026-11-21",
+  "season_end": "2027-04-04",
+  "verified_on": "2026-11-23",
+  "source_page": "https://www.sunpeaksresort.com/explore/getting-here-around/in-resort-shuttle",
+  "image_url": "https://www.sunpeaksresort.com/sites/default/files/2026-11/SPR-Shuttle-Schedule-East-2026-27.png",
+  "image_sha256": "bab6cf81e415f38822d9db24697f2274f53c5b85d33f823c6fc125c4cda12774",
+  "trips": [
+    {"village": "08:40", "lookout": "08:45", "previous_lookout": "08:30"},
+    {"village": "09:40", "lookout": "09:45", "previous_lookout": "09:30"},
+    {"village": "11:40", "lookout": "11:45", "previous_lookout": "11:30"},
+    {"village": "12:40", "lookout": "12:45", "previous_lookout": "12:30"},
+    {"village": "13:40", "lookout": "13:45", "previous_lookout": "13:30"},
+    {"village": "15:40", "lookout": "15:45", "previous_lookout": "15:30"},
+    {"village": "16:40", "lookout": "16:45", "previous_lookout": "16:30"},
+    {"village": "18:00", "lookout": "18:05", "previous_lookout": "17:50"},
+    {"village": "18:40", "lookout": "18:45", "previous_lookout": "18:30"},
+    {"village": "19:20", "lookout": "19:25", "previous_lookout": "19:10"},
+    {"village": "20:30", "lookout": "20:35", "previous_lookout": "20:20"},
+    {"village": "21:10", "lookout": "21:15", "previous_lookout": "21:00"},
+    {"village": "21:50", "lookout": "21:55", "previous_lookout": "21:40"}
+  ],
+  "breaks": [["10:20", "11:00"], ["14:20", "15:00"], ["19:30", "20:10"]]
+}

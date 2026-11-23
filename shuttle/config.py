@@ -1,11 +1,14 @@
 """Settings for the shuttle app (``BDH_SHUTTLE_*``)."""
 import datetime as dt
+import json
+from pathlib import Path
 
 from bdh_sdk import alerts
 from bdh_sdk.plugins import as_list
 from bdh_sdk.settings import app_setting
 
 APP_ID = "shuttle"
+TIMETABLE = json.loads((Path(__file__).parent / "data" / "timetable.json").read_text(encoding="utf-8"))
 
 
 def _date(key, default):
@@ -20,12 +23,12 @@ def _date(key, default):
 
 def season_start():
     """First day of winter service (2026/27 season)."""
-    return _date("season_start", dt.date(2026, 11, 21))
+    return _date("season_start", dt.date.fromisoformat(TIMETABLE["season_start"]))
 
 
 def season_end():
     """Last day of winter service."""
-    return _date("season_end", dt.date(2027, 4, 4))
+    return _date("season_end", dt.date.fromisoformat(TIMETABLE["season_end"]))
 
 
 def speakers():

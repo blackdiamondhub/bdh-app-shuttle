@@ -1,0 +1,42 @@
+name: Check official shuttle timetable
+
+on:
+  schedule:
+    # 7 AM Sun Peaks (UTC-7), before morning service.
+    - cron: "0 14 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: shuttle-schedule-monitor
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Compare official image with the reviewed timetable
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python -m shuttle.schedule_monitor
+
+  keepalive:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: write
+    steps:
+      - name: Keep this public-repository schedule enabled during quiet periods
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow enable schedule-monitor.yml --repo "$GITHUB_REPOSITORY"

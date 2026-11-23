@@ -4,10 +4,9 @@ All times are Sun Peaks wall-clock time. BC is on permanent UTC-7 from
 November 2026, so a fixed offset is used rather than a tz database that may
 still think BC changes clocks.
 
-Times are the 2025/26 East loop timetable; the resort hasn't posted 2026/27
-yet. "From the lodge" is when the bus reaches Lookout Ridge on its way back
-to the Village Day Lodge; "Back from the Village" is when it leaves the
-Village Day Lodge, reaching Lookout Ridge about ``RIDE_MIN`` later.
+Times come from the reviewed 2026/27 East timetable in data/timetable.json.
+Lookout Ridge pickups and Village Day Lodge departures are published stop
+times on the same loop. Return arrivals at the Village are not published.
 """
 import datetime as dt
 
@@ -16,18 +15,15 @@ from django.utils import timezone
 from . import config
 
 LOCAL = dt.timezone(dt.timedelta(hours=-7))
-RIDE_MIN = 10
 LEADS = (5, 10, 15, 20)
 MIN_LEAD = LEADS[0]
 LODGE, VILLAGE = "lodge", "village"
 
-_FROM_LODGE = ("08:30", "09:30", "11:30", "12:30", "13:30", "15:30", "16:30",
-               "17:50", "18:30", "19:10", "20:20", "21:00", "21:40")
-_FROM_VILLAGE = ("08:20", "09:20", "11:20", "12:20", "13:20", "15:20", "16:20",
-                 "17:40", "18:20", "19:00", "20:10", "20:50", "21:30")
-_BREAKS = (("10:00", "10:40"), ("14:00", "14:40"), ("19:10", "19:50"))
-
-TIMES = {LODGE: _FROM_LODGE, VILLAGE: _FROM_VILLAGE}
+TIMES = {direction: tuple(trip[key] for trip in config.TIMETABLE["trips"])
+         for direction, key in ((LODGE, "lookout"), (VILLAGE, "village"))}
+_BREAKS = config.TIMETABLE["breaks"]
+_REVISED = {trip["previous_lookout"]: trip["lookout"] for trip in config.TIMETABLE["trips"]
+            if trip.get("previous_lookout") and trip["previous_lookout"] != trip["lookout"]}
 
 
 def _hm(s):
@@ -93,8 +89,7 @@ def next_departure(now=None):
         if t >= now:
             return {"at": t, "iso": t.isoformat(), "time": label(t),
                     "rel": relative(t - now),
-                    "today": day == now.date(),
-                    "village": label(t + dt.timedelta(minutes=RIDE_MIN))}
+                    "today": day == now.date()}
     return None
 
 
@@ -126,7 +121,7 @@ def board(direction=LODGE, now=None):
             row["remind"] = direction == LODGE and \
                 (t - now) > dt.timedelta(minutes=MIN_LEAD)
         if direction == VILLAGE:
-            row["arrive"] = label(t + dt.timedelta(minutes=RIDE_MIN))
+            row["arrive"] = label(_hm(TIMES[LODGE][i]))
         rows.append(row)
     if not preview:
         last_past = max((i for i, r in enumerate(rows) if r.get("past")), default=None)
@@ -149,6 +144,15 @@ def is_departure(iso):
     if not running_on(t.date()) or t not in departures(t.date()):
         return None
     return t
+
+
+def revised_departure(t):
+    """Move a saved reminder from the superseded stop time to the same revised trip."""
+    t = t.astimezone(LOCAL)
+    replacement = _REVISED.get(t.strftime("%H:%M"))
+    if replacement and not t.second and not t.microsecond and running_on(t.date()):
+        return dt.datetime.combine(t.date(), _hm(replacement), LOCAL)
+    return None
 
 
 def season_note(now=None):

@@ -48,7 +48,23 @@ def _load():
     global _recs
     if _recs is None:
         raw = _state().get("reminders") or []
-        _recs = [r for r in raw if isinstance(r, dict) and r.get("id") and r.get("departure")]
+        loaded = [dict(r) for r in raw if isinstance(r, dict) and r.get("id") and r.get("departure")]
+        changed = False
+        for r in loaded:
+            if r.get("timetable_revision") == config.TIMETABLE["image_sha256"]:
+                continue
+            old = dt.datetime.fromtimestamp(r["departure"], schedule.LOCAL)
+            revised = schedule.revised_departure(old)
+            if revised is not None:
+                r["departure"] = revised.timestamp()
+                changed = True
+                log.info("Retimed shuttle reminder from %s to %s after timetable revision",
+                         old.isoformat(), revised.isoformat())
+            r["timetable_revision"] = config.TIMETABLE["image_sha256"]
+            changed = True
+        if changed:
+            _state().set("reminders", loaded)
+        _recs = loaded
     return _recs
 
 
@@ -132,7 +148,8 @@ def add(departure, lead_min, speakers=None, now=None):
                 raise ValueError(f"You can have up to {MAX_ACTIVE} reminders at once.")
             rec = {"id": secrets.token_hex(4), "departure": dep, "created": now_ts}
             recs.append(rec)
-        rec.update(lead_min=lead_min, speakers=picked)
+        rec.update(lead_min=lead_min, speakers=picked,
+                   timetable_revision=config.TIMETABLE["image_sha256"])
         _save()
         log.info("shuttle reminder %s set: %s bus, %d min before", rec["id"], _iso(dep), lead_min)
         return view(rec)
