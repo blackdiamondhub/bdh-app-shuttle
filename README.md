@@ -1,7 +1,7 @@
 # bdh-app-shuttle
 
 BlackDiamondHub plugin app: **Shuttle** — the free Sun Peaks in-resort shuttle
-(East loop) from the Lookout Ridge stop (E7, near the hot tub): next bus,
+(East loop) from the Lookout Ridge stop (E6, near the hot tub): next bus,
 the day's timetable both ways, a live map of the bus from skiKrumb, and
 "remind me" alerts on the hub's screens and speakers.
 
@@ -23,11 +23,16 @@ Leaving the page restores the display's normal idle behavior.
 
 The reviewed 2026/27 East loop timetable is in `shuttle/data/timetable.json`,
 including its official image URL, SHA-256, service dates, paired Village Day
-Lodge departures / E7 Lookout Ridge pickups, and driver breaks. For example,
+Lodge departures / E6 Lookout Ridge pickups, and driver breaks. For example,
 the Village departure is 1:40 PM and the Lookout Ridge pickup is about 1:45 PM.
 The resort does not publish a return arrival at the Village: the bus continues
 around the remaining East loop stops, so the app does not invent one.
 All displayed times are Sun Peaks wall-clock time, fixed UTC−7.
+Stop numbers follow the resort's [2026/27 stop map](https://www.sunpeaksresort.com/sites/default/files/2026-11/VillageMap_2026-27_WEB.png),
+with E6 highlighted as our stop and all E1–E10 codes visible. Map pins are
+approximate street positions, not surveyed stop-sign coordinates.
+E4–E7 share the same published timetable column, so correcting our stop to E6
+does not change reminder times.
 
 ### Schedule maintenance
 
@@ -62,6 +67,17 @@ The resort's live shuttle page embeds skiKrumb's map, which reads
 the same feed (cached 8 s, last good answer kept for an hour), shows fixes newer
 than 5 minutes, and names the nearest stop. Off-season the feed returns the
 tracker with no position and the map just shows the route.
+
+**Find shuttle** centers on the last reported position (or frames all positions
+if multiple shuttles are reporting). **Show route** restores the full East loop.
+Neither enables automatic following; new GPS fixes do not move the map.
+Find shuttle is disabled while no position is available, including off-season.
+
+The status says **Live** only while the feed is healthy and every displayed GPS
+fix is at most 15 seconds old. Otherwise it shows the last position's age
+(the oldest when there are multiple shuttles), ticking between feed polls.
+Age comes from skiKrumb's GPS `recorded_at`, not when the page last fetched it.
+Cached fixes and an unavailable upstream feed do not falsely turn Live.
 
 ## Reminders
 

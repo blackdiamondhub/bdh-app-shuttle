@@ -1,24 +1,28 @@
-"""East loop stops and route. Positions are placed on OSM streets from the
-resort's stop map; they're good to ~30 m, enough for "near <stop>"."""
+"""East stops from the resort's 2026/27 VillageMap_2026-27_WEB.png.
+
+Pins are approximate street positions, checked against the resort map and
+OSM geometry; stop numbers refer to the resort's signs, not nearby buildings.
+"""
 import json
 import math
 from functools import lru_cache
 from pathlib import Path
 
-OUR_STOP = "E7"
+OUR_STOP = "E6"
 
 # Loop order. ``label``: name drawn on the map (others show on tap).
 STOPS = (
     {"id": "VDL", "name": "Village Day Lodge", "lat": 50.88405, "lon": -119.88640, "label": True},
-    {"id": "E1", "name": "Ice Rink", "lat": 50.88520, "lon": -119.87815, "label": True},
-    {"id": "E2", "name": "McGillivray Creek", "lat": 50.88345, "lon": -119.87470, "label": False},
-    {"id": "E3", "name": "Orient Chair", "lat": 50.88300, "lon": -119.87130, "label": True},
-    {"id": "E4", "name": "P5 Entrance", "lat": 50.88360, "lon": -119.86800, "label": False},
-    {"id": "E5", "name": "Switchback Creek", "lat": 50.88505, "lon": -119.86560, "label": "left"},
-    {"id": "E6", "name": "Altitude", "lat": 50.88345, "lon": -119.86200, "label": True},
-    {"id": "E7", "name": "Lookout Ridge", "lat": 50.88512, "lon": -119.86467, "label": True},
-    {"id": "E8", "name": "Stones Throw", "lat": 50.88405, "lon": -119.86790, "label": False},
-    {"id": "E9", "name": "Trappers Landing", "lat": 50.88370, "lon": -119.87330, "label": False},
+    {"id": "E1", "name": "Village Place", "lat": 50.88471, "lon": -119.877593, "label": True},
+    {"id": "E2", "name": "Valley Drive", "lat": 50.88345, "lon": -119.87470, "label": False},
+    {"id": "E3", "name": "Skier Underpass", "lat": 50.88300, "lon": -119.87130, "label": True},
+    {"id": "E4", "name": "Valley Drive", "lat": 50.882554, "lon": -119.866334, "label": False},
+    {"id": "E5", "name": "Valley Drive", "lat": 50.882704, "lon": -119.862778, "label": "left"},
+    {"id": "E6", "name": "Lookout Ridge", "lat": 50.88512, "lon": -119.86467, "label": True},
+    {"id": "E7", "name": "Lookout Ridge Drive", "lat": 50.88345, "lon": -119.86200, "label": True},
+    {"id": "E8", "name": "Valley Drive", "lat": 50.883206, "lon": -119.867700, "label": False, "side": "left"},
+    {"id": "E9", "name": "Valley Drive", "lat": 50.88370, "lon": -119.87330, "label": False},
+    {"id": "E10", "name": "Ice Rink", "lat": 50.885722, "lon": -119.878521, "label": True},
 )
 
 

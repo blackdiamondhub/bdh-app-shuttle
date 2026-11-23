@@ -16,6 +16,10 @@
   {% csrf_token %}
   <div class="sh-mapc">
     <div id="sh-map"></div>
+    <div class="sh-map-actions" role="group" aria-label="Map controls">
+      <button type="button" id="sh-find" disabled title="No shuttle position is available"><i class="fas fa-location-crosshairs"></i><span>Find shuttle</span></button>
+      <button type="button" id="sh-route" disabled><i class="fas fa-route"></i>Show route</button>
+    </div>
     <div class="sh-live{% if not in_season %} off{% endif %}" id="sh-live">
       <span class="pulse"></span>
       <div>
