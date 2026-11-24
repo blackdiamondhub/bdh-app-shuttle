@@ -9,7 +9,7 @@ IMAGE = "https://www.sunpeaksresort.com/sites/default/files/2026-11/east.png"
 PNG = b"\x89PNG\r\n\x1a\nreviewed image"
 BASE = {"source_page": PAGE, "image_url": IMAGE, "image_sha256": hashlib.sha256(PNG).hexdigest(),
         "season": "2026/27", "verified_on": "2026-11-23"}
-REPO = "blackdiamondlodge/bdh-app-shuttle"
+REPO = "blackdiamondhub/bdh-app-shuttle"
 
 
 def html(src):
