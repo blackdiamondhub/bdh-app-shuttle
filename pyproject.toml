@@ -15,7 +15,7 @@ dependencies = [
 ]
 
 [project.urls]
-Source = "https://github.com/blackdiamondlodge/bdh-app-shuttle"
+Source = "https://github.com/blackdiamondhub/bdh-app-shuttle"
 
 [project.entry-points."blackdiamondhub.plugins"]
 shuttle = "shuttle.plugin:spec"
