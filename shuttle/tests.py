@@ -162,7 +162,7 @@ class LiveTests(TestCase):
         self.assertTrue(s["ok"])
         self.assertFalse(s["stale"])
         self.assertEqual(len(s["buses"]), 1)
-        self.assertEqual(s["buses"][0]["near"], "E3 Skier Underpass")
+        self.assertEqual(s["buses"][0]["near"], "E3 Orient Chair")
         self.assertFalse(s["buses"][0]["at_our_stop"])
 
     def test_at_our_stop(self):
@@ -178,6 +178,9 @@ class LiveTests(TestCase):
                   ("E7", 50.88345, -119.86200), ("E8", 50.883206, -119.867700),
                   ("E9", 50.88367244784997, -119.87362588960312),
                   ("E10", 50.88465648796544, -119.8783275104009))
+        names = {"E1": "Village Walk", "E2": "McGillvray Creek", "E3": "Orient Chair",
+                 "E4": "P5 Entrance", "E5": "Switchback Creek", "E6": "Altitude",
+                 "E7": "Lookout Ridge", "E8": "Stones Throw", "E9": "Trappers Landing", "E10": "Ice Rink"}
         for code, lat, lon in points:
             with self.subTest(code=code):
                 stop, distance = stops.nearest(lat, lon)
@@ -186,7 +189,7 @@ class LiveTests(TestCase):
                 cache.clear()
                 with patch.object(live, "fetch", return_value=[self.marker(lat, lon)]):
                     bus = live.status()["buses"][0]
-                self.assertTrue(bus["near"].startswith(code + " "))
+                self.assertEqual(bus["near"], f"{code} {names[code]}")
                 self.assertEqual(bus["at_our_stop"], code == "E6")
 
     def test_falls_back_to_last_good_when_feed_fails(self):
@@ -229,6 +232,19 @@ class LiveTests(TestCase):
             self.assertEqual({tuple(route[i - 1]), tuple(route[i + 1])},
                              {(50.883196, -119.868128), (50.883096, -119.867149)})
 
+    def test_route_connects_village_walk_and_skips_mcgillvray_townhomes(self):
+        route = stops.route()
+        west = route.index([50.884581, -119.878774])
+        east = route.index([50.884372, -119.876682], west + 1)
+        self.assertIn([50.884261, -119.878125], route[west:east + 1])
+        self.assertIn([50.884202, -119.87728], route[west:east + 1])
+        self.assertNotIn([50.884637, -119.877855], route[west:east + 1])
+        self.assertIn([50.884637, -119.877855], route[east + 1:])  # return via Village Way past E10
+        for point in ([50.88354, -119.875229], [50.883446, -119.874702],
+                      [50.883306, -119.873965], [50.883247, -119.872998]):
+            self.assertNotIn(point, route)
+        self.assertEqual(route.count([50.883655, -119.873832]), 2)
+
 
 class PageTests(Fresh, TestCase):
     def test_shuttle_opts_out_of_screensaver_in_and_out_of_season(self):
@@ -243,10 +259,10 @@ class PageTests(Fresh, TestCase):
         self.assertContains(r, "Next shuttle")
         self.assertContains(r, 'data-t="2026-12-01T16:45:00-07:00"')
         self.assertContains(r, "To the Village via the remaining East loop stops")
-        self.assertContains(r, "Lookout Ridge pickup")
+        self.assertContains(r, "Altitude pickup")
         self.assertNotContains(r, "arrives Village Day Lodge")
         self.assertContains(r, "Shuttle (live)")
-        self.assertContains(r, "Lookout Ridge")
+        self.assertContains(r, "Altitude stop (E6, near hot tub)")
         self.assertNotContains(r, "Free in-resort shuttle")
         self.assertNotContains(r, "Remind me")  # no speakers allowed yet
         geo = json.loads(r.content.decode().split('id="sh-geo" type="application/json">')[1].split("</script>")[0])
@@ -280,7 +296,7 @@ class PageTests(Fresh, TestCase):
     def test_popup(self):
         r = self.client.get(reverse("shuttle_popup", args=[10]))
         self.assertContains(r, "Shuttle in 10 minutes")
-        self.assertContains(r, "To the Village from Lookout Ridge")
+        self.assertContains(r, "To the Village from Altitude")
         self.assertContains(self.client.get(reverse("shuttle_popup", args=[1])), "Shuttle in 1 minute<")
 
 
@@ -392,6 +408,8 @@ class WorkerTests(Fresh, TestCase):
         self.assertEqual((alert.key, alert.title, alert.embed_url, alert.sound),
                          (f"reminder:{r['id']}", "Shuttle in 10 minutes", "/shuttle/popup/10/", "kalimba"))
         self.assertIn("in about 10 minutes", alert.speak)
+        self.assertIn("reaches Altitude", alert.speak)
+        self.assertEqual(alert.body, "To the Village from Altitude")
         kw = thread.call_args.kwargs
         self.assertEqual((kw["target"], kw["args"][1]), (worker.announce, [DECK]))
         with speakers_on(BDH_SHUTTLE_VOLUME="40", BDH_SHUTTLE_CHIME="kalimba"), \
@@ -625,7 +643,7 @@ class BrowserTests(StaticLiveServerTestCase):
             d.get(self.live_server_url + reverse("shuttle"))
             wait = WebDriverWait(d, 10)
             wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "#sh-map .sh-bus")))
-            wait.until(EC.text_to_be_present_in_element((By.ID, "sh-ls"), "Near E3 Skier Underpass"))
+            wait.until(EC.text_to_be_present_in_element((By.ID, "sh-ls"), "Near E3 Orient Chair"))
             self.assertEqual(len(d.find_elements(By.CSS_SELECTOR, "#sh-map .sh-our")), 1)
             # Nothing on the page scrolls at 1920x1080.
             self.assertFalse(d.execute_script(
@@ -638,6 +656,7 @@ class BrowserTests(StaticLiveServerTestCase):
                        if b.is_enabled()]
             self.assertEqual(enabled, ["5"])
             self.assertIn("in about 5 minutes", d.find_element(By.ID, "sh-say").text)
+            self.assertIn("reaches Altitude", d.find_element(By.ID, "sh-say").text)
             self.assertIn("4:40 PM", d.find_element(By.CSS_SELECTOR, '#sh-leads [data-lead="5"]').text)
             # Speaker picker: all by default; pick just the deck.
             wait.until(EC.visibility_of_element_located((By.CSS_SELECTOR, '#sh-spk [data-spk="all"]')))
@@ -682,7 +701,7 @@ class BrowserTests(StaticLiveServerTestCase):
             (() => {
             window.shLive = {ok: true, stale: false, buses: [{
               lat: 50.883, lon: -119.8713, at: %s, age_s: 1,
-              near: 'E3 Skier Underpass', at_our_stop: false
+              near: 'E3 Orient Chair', at_our_stop: false
             }]};
             window.shElapsed = 0;
             window.shHttpError = false;
@@ -728,7 +747,7 @@ class BrowserTests(StaticLiveServerTestCase):
             wait = WebDriverWait(d, 10)
             wait.until(lambda drv: drv.find_elements(By.CSS_SELECTOR, ".sh-bus") and
                        drv.find_element(By.ID, "sh-find").is_enabled())
-            self.assertIn("E6 Lookout Ridge · our stop",
+            self.assertIn("E6 Altitude · our stop",
                           d.find_element(By.CSS_SELECTOR, ".sh-our .sh-slab").text)
             labels = [e.text for e in d.find_elements(By.CSS_SELECTOR, ".sh-slab")]
             for code in ("E2", "E8", "E9"):
@@ -738,7 +757,7 @@ class BrowserTests(StaticLiveServerTestCase):
             self.assertIn("E10 Ice Rink", labels)
             self.assertTrue(d.execute_script("""
                 const labels = [...document.querySelectorAll('.sh-slab')];
-                const first = labels.find(el => el.textContent === 'E1 Village Place').getBoundingClientRect();
+                const first = labels.find(el => el.textContent === 'E1 Village Walk').getBoundingClientRect();
                 const last = labels.find(el => el.textContent === 'E10 Ice Rink').getBoundingClientRect();
                 return first.right <= last.left || last.right <= first.left ||
                        first.bottom <= last.top || last.bottom <= first.top;

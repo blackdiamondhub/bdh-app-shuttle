@@ -6,6 +6,7 @@
   const IN_SEASON = !!root.dataset.season, REMINDERS = !!root.dataset.reminders;
   const csrf = (root.querySelector("[name=csrfmiddlewaretoken]") || {}).value || "";
   const geo = JSON.parse(document.getElementById("sh-geo").textContent);
+  const pickupStop = geo.stops.find((s) => s.id === geo.our).name;
   const $ = (id) => document.getElementById(id);
 
   // Sun Peaks is fixed UTC-7; format times there whatever the browser thinks.
@@ -106,7 +107,7 @@
       const known = ages.every((age) => age !== null);
       const age = known ? Math.max(...ages) : null;
       const fresh = healthy && known && age <= 15;
-      const where = b.at_our_stop ? "At Lookout Ridge now" : (b.near ? `Near ${b.near}` : "On the East loop");
+      const where = b.at_our_stop ? `At ${pickupStop} now` : (b.near ? `Near ${b.near}` : "On the East loop");
       const freshness = fresh ? "Live" : (known ? `${positions.length > 1 ? "Oldest position" : "Last position"} ${ago(age)}` : "Position time unavailable");
       setLive(positions.length > 1 ? `${positions.length} shuttles running` : "East shuttle",
               `${where} · ${freshness}`, !fresh);
@@ -226,7 +227,7 @@
 
   const ov = $("sh-ov");
   function sayText(n) {
-    return `“Heads up! The shuttle to the Village reaches Lookout Ridge in about ${n} minutes. Time to put your boots on!”`;
+    return `“Heads up! The shuttle to the Village reaches ${pickupStop} in about ${n} minutes. Time to put your boots on!”`;
   }
   function refreshLeads() {
     if (!current || ov.hidden) return;

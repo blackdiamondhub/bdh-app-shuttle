@@ -1,11 +1,11 @@
-"""Shuttle timetable for the Lookout Ridge stop (E6, near the hot tub).
+"""Shuttle timetable for the Altitude stop (E6, near the hot tub).
 
 All times are Sun Peaks wall-clock time. BC is on permanent UTC-7 from
 November 2026, so a fixed offset is used rather than a tz database that may
 still think BC changes clocks.
 
 Times come from the reviewed 2026/27 East timetable in data/timetable.json.
-Lookout Ridge pickups and Village Day Lodge departures are published stop
+E6 pickups and Village Day Lodge departures are published stop
 times on the same loop. Return arrivals at the Village are not published.
 """
 import datetime as dt
@@ -80,7 +80,7 @@ def in_season(now=None):
 
 
 def next_departure(now=None):
-    """The next bus from Lookout Ridge, as a dict, or None off-season."""
+    """The next bus from our pickup stop, as a dict, or None off-season."""
     now = local_now(now)
     day = service_day(now)
     if day is None:
@@ -133,7 +133,7 @@ def board(direction=LODGE, now=None):
 
 def is_departure(iso):
     """The aware datetime for a reminder request, if it is a real upcoming
-    bus from Lookout Ridge; else None."""
+    bus from our pickup stop; else None."""
     try:
         t = dt.datetime.fromisoformat(str(iso))
     except ValueError:

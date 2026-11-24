@@ -37,7 +37,7 @@
   <div class="sh-rail">
     <div class="sh-card" id="sh-next">
       {% if next and not lodge.preview %}
-      <div class="lbl"><i class="fas fa-location-dot"></i>{% if next.today %}Next shuttle{% else %}First shuttle tomorrow{% endif %} · Lookout Ridge stop (near hot tub)</div>
+      <div class="lbl"><i class="fas fa-location-dot"></i>{% if next.today %}Next shuttle{% else %}First shuttle tomorrow{% endif %} · {{ pickup_stop }} stop (E6, near hot tub)</div>
       <div class="sh-nx">
         <div class="t">{{ next.time|slice:":-3" }}<small>{{ next.time|slice:"-2:" }}</small></div>
         <div class="in" data-t="{{ next.iso }}" data-next="1">{% if next.today %}{{ next.rel }}{% endif %}</div>
@@ -47,14 +47,14 @@
       {% else %}
       <div class="lbl"><i class="fas fa-calendar"></i>Winter service</div>
       <div class="sh-nx"><div class="t sm">{{ season_note }}</div></div>
-      <div class="where">Daily, about {{ first_bus }} – {{ last_bus }} from Lookout Ridge (near hot tub). The timetable below is a preview.</div>
+      <div class="where">Daily, about {{ first_bus }} – {{ last_bus }} from {{ pickup_stop }} (E6, near hot tub). The timetable below is a preview.</div>
       {% endif %}
     </div>
 
     <div class="sh-card sh-deps">
       <div class="lbl"><i class="fas fa-clock"></i>Scheduled stop times{% if lodge.tomorrow %} · tomorrow{% endif %}</div>
       <div class="sh-tabs" role="tablist">
-        <button type="button" class="on" data-tab="lodge">Lookout Ridge pickup</button>
+        <button type="button" class="on" data-tab="lodge">{{ pickup_stop }} pickup</button>
         <button type="button" data-tab="village">From Village Day Lodge</button>
       </div>
       {% for key, b in boards %}
@@ -64,7 +64,7 @@
           {% else %}
           <div class="sh-row{% if r.past %} past{% endif %}">
             <div class="tm">{{ r.time }}</div>
-            <div class="rel"{% if not r.past and not b.preview and not b.tomorrow %} data-t="{{ r.iso }}"{% endif %}>{% if r.past %}scheduled time passed{% else %}{{ r.rel }}{% endif %}{% if r.arrive and not r.past %}<span class="arr">Lookout Ridge ~{{ r.arrive }}</span>{% endif %}{% if r.last %} <span class="tag">Last bus</span>{% endif %}</div>
+            <div class="rel"{% if not r.past and not b.preview and not b.tomorrow %} data-t="{{ r.iso }}"{% endif %}>{% if r.past %}scheduled time passed{% else %}{{ r.rel }}{% endif %}{% if r.arrive and not r.past %}<span class="arr">{{ pickup_stop }} ~{{ r.arrive }}</span>{% endif %}{% if r.last %} <span class="tag">Last bus</span>{% endif %}</div>
             {% if r.remind and reminders_on %}<button type="button" class="rb" data-dep="{{ r.iso }}" data-label="{{ r.time }}" aria-label="Remind me about the {{ r.time }} shuttle"><i class="far fa-bell"></i></button>{% endif %}
           </div>
           {% endif %}
@@ -81,7 +81,7 @@
 <div class="sh-ov" id="sh-ov" hidden>
   <div class="sh-dlg" role="dialog" aria-modal="true" aria-labelledby="sh-dh">
     <h3 id="sh-dh"><i class="fas fa-bell"></i><span>Remind me about the <span id="sh-dt"></span> shuttle</span></h3>
-    <div class="m">From Lookout Ridge (near hot tub) to the Village</div>
+    <div class="m">From {{ pickup_stop }} (E6, near hot tub) to the Village</div>
     <div class="q">How much warning?</div>
     <div class="sh-leads" id="sh-leads">
       {% for n in leads %}<button type="button" data-lead="{{ n }}">{{ n }} min<small></small></button>{% endfor %}
