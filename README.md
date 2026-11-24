@@ -1,7 +1,7 @@
 # bdh-app-shuttle
 
 BlackDiamondHub plugin app: **Shuttle** — the free Sun Peaks in-resort shuttle
-(East loop) from the Lookout Ridge stop (E6, near the hot tub): next bus,
+(East loop) from the Altitude stop (E6, near the hot tub): next bus,
 the day's timetable both ways, a live map of the bus from skiKrumb, and
 "remind me" alerts on the hub's screens and speakers.
 
@@ -23,8 +23,8 @@ Leaving the page restores the display's normal idle behavior.
 
 The reviewed 2026/27 East loop timetable is in `shuttle/data/timetable.json`,
 including its official image URL, SHA-256, service dates, paired Village Day
-Lodge departures / E6 Lookout Ridge pickups, and driver breaks. For example,
-the Village departure is 1:40 PM and the Lookout Ridge pickup is about 1:45 PM.
+Lodge departures / E6 Altitude pickups, and driver breaks. For example,
+the Village departure is 1:40 PM and the Altitude pickup is about 1:45 PM.
 The resort does not publish a return arrival at the Village: the bus continues
 around the remaining East loop stops, so the app does not invent one.
 All displayed times are Sun Peaks wall-clock time, fixed UTC−7.
@@ -34,6 +34,13 @@ locally confirmed stop coordinates; curbside pins are not snapped to the
 road-centre-line route. E4 is labelled P5 Entrance and E5 Switchback Creek.
 The route stays on the main road at E8 (not into Settlers Crossing) and
 passes E10 on Village Way without a detour up Village Place.
+Outbound, it follows the Village Walk access driveway past E1, joining
+Village Way at both ends. Between E2 and E3 it follows the main Valley Drive
+road, not the McGillvray Creek townhome driveway.
+Stop names are Village Walk, McGillvray Creek, Orient Chair, P5 Entrance,
+Switchback Creek, Altitude, Lookout Ridge, Stones Throw, Trappers Landing
+and Ice Rink (E1 through E10). Pickup labels and reminder announcements
+use the same E6 name as the map.
 E4–E7 share the same published timetable column, so correcting our stop to E6
 does not change reminder times.
 
@@ -86,7 +93,7 @@ Cached fixes and an unavailable upstream feed do not falsely turn Live.
 
 The hub keeps and fires reminders itself (since 2.1.0; before that they lived in
 the `bdl_shuttle` AppDaemon app). A reminder is "N minutes before this bus
-reaches Lookout Ridge": a 5/10/15/20-minute lead for a real departure that
+reaches Altitude": a 5/10/15/20-minute lead for a real departure that
 hasn't passed, at most five at a time, one per bus. They are kept in the app's
 state, so they survive a restart; one that came due while the hub was down
 still plays (with the minutes recomputed) unless the bus has already gone.
@@ -100,7 +107,7 @@ The admin chooses which speakers reminders may use (`speakers`); a guest picks
 "All speakers" or some of them when setting one. Leave `speakers` empty to hide
 reminders. Night hours don't apply: a guest asked for this one. (The hub still
 keeps the screens' own alert sound quiet during its night window; the speakers
-play.) Bells only appear on "Lookout Ridge pickup".
+play.) Bells only appear on "Altitude pickup".
 
 When upgrading from AppDaemon reminders, set `speakers` to the speakers the
 old announcer used. The old `reminders_url` setting does not enable native

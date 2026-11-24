@@ -1,7 +1,7 @@
 """Shuttle reminders, kept by the hub itself.
 
 A reminder is one-off: "``lead_min`` minutes before the <departure> bus
-reaches Lookout Ridge, say so". The hub runs one server process, so a
+reaches our pickup stop, say so". The hub runs one server process, so a
 module-level list under a lock is the source of truth; every change is written
 through to ``app_state`` so reminders survive a restart. The ticker in
 :mod:`shuttle.worker` calls :func:`tick` and plays whatever came due.
@@ -20,11 +20,11 @@ import threading
 
 from bdh_sdk.storage import app_state
 
-from . import config, schedule
+from . import config, schedule, stops
 
 log = logging.getLogger(__name__)
 
-STOP = "Lookout Ridge"
+STOP = next(s["name"] for s in stops.STOPS if s["id"] == stops.OUR_STOP)
 DESTINATION = "the Village"
 MESSAGE = ("Heads up! The shuttle to {destination} reaches {stop} "
            "in about {minutes}. Time to put your boots on!")
