@@ -10,6 +10,9 @@ spec = PluginSpec(
     app="shuttle",
     urls="shuttle.urls",
     status="shuttle.homepage.status",
+    # Read-only timetable lookups for the hub's assistant, in every mode.
+    tools="shuttle.assistant.tools",
+    run_tool="shuttle.assistant.run_tool",
     tiles=(
         Tile(
             title="Shuttle",
