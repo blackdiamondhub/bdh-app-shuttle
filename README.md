@@ -113,6 +113,21 @@ When upgrading from AppDaemon reminders, set `speakers` to the speakers the
 old announcer used. The old `reminders_url` setting does not enable native
 reminders; without a saved speaker selection, notification controls stay hidden.
 
+## Assistant tools
+
+The hub's assistant (e.g. the voice app) can look up the shuttle through one read-only tool,
+offered in every mode (guest, dashboard and owner). The hub only offers it when `shuttle` is in
+its `assistant_apps` setting (Settings > Location > Assistant).
+
+| Tool | Params | Answers |
+|---|---|---|
+| `next_shuttle` | `direction` (`to_village`, the default: from E6 Altitude to the Village Day Lodge; `to_lodge`: back from the Village), `day` (`today`, the default, or `tomorrow`) | Today: the next 3 buses with minutes until ("4:45 pm, in 12 minutes"; back from the Village with when it reaches the lodge), and the first and last bus of the day. `tomorrow`: the whole day's times |
+
+Times come from the same timetable and season dates as the board, in lodge time (UTC-7). After
+the last bus it answers with tomorrow's first buses; before the season starts, with the first
+day of service; after the season ends (or after the last bus of the season) it fails with a short
+sentence the assistant can say. The resort doesn't publish when the bus reaches the Village, so
+the answer says so rather than inventing a time. Live bus positions aren't part of the answer.
 ## Container (hub API 2)
 
 Since 2.0.0 the app runs in its own container:

@@ -879,3 +879,105 @@ class HubFrameLayoutTests(TestCase):
                 if pattern.search(line):
                     hits.append(f"{path.relative_to(root)}:{n}: {line.strip()}")
         self.assertEqual(hits, [])
+
+
+class AssistantToolTests(Fresh, TestCase):
+    """The assistant's shuttle lookup, run the way the hub runs it (FakeBroker sessions)."""
+
+    def setUp(self):
+        from bdh_sdk import Stay, settings
+        from bdh_sdk.testing import FakeBroker
+
+        super().setUp()
+        saved = settings._store
+        self.broker = FakeBroker(grants=("tools.*", "settings.get", "events.subscribe"), install=True,
+                                 app_id="shuttle")
+        self.broker.start()
+        self.addCleanup(settings.set_store, saved)
+        self.addCleanup(self.broker.stop)
+        self.broker.stay = Stay(guest="Smith")  # a voice session during a stay is in guest mode
+
+    def call(self, when, args=None):
+        from bdh_sdk import tools as sdk_tools
+        from shuttle import assistant
+
+        self.broker.assistant_tools.clear()
+        for tool in assistant.tools(mode="guest"):
+            self.broker.add_tool(tool, lambda a, t=tool.id: assistant.run_tool(t, a, mode="guest"))
+        with at(when):
+            return sdk_tools.call_tool(sdk_tools.open_session(), "next_shuttle", args)
+
+    def ok(self, when, args=None):
+        result = self.call(when, args)
+        self.assertTrue(result["ok"], result)
+        return result["result"]
+
+    def test_every_mode_gets_one_readonly_lookup(self):
+        from bdh_sdk import ALL_MODES, hooks
+        from shuttle import assistant
+        from shuttle.plugin import spec
+        for mode in sorted(ALL_MODES):
+            with self.subTest(mode=mode):
+                tools = assistant.tools(mode=mode)
+                self.assertEqual([t.id for t in tools], ["next_shuttle"])
+                self.assertEqual((tools[0].modes, tools[0].readonly, tools[0].confirm), (ALL_MODES, True, False))
+                self.assertLessEqual(len(tools[0].description), 300)
+        self.assertEqual([t["id"] for t in hooks.run(spec, "tools", mode="guest")], ["next_shuttle"])
+
+    def test_next_buses_to_the_village(self):
+        self.assertEqual(self.ok(local(2026, 12, 1, 16, 33)), {
+            "from": "Altitude stop (E6, by the hot tub)", "to": "Village Day Lodge", "day": "today",
+            "first_bus": "8:45 am", "last_bus": "9:55 pm",
+            "next": ["4:45 pm, in 12 minutes", "6:05 pm, in 1 hour 32 minutes", "6:45 pm, in 2 hours 12 minutes"],
+            "arrival_at_village": assistant_no_arrival(),
+        })
+        self.assertEqual(self.ok(local(2026, 12, 1, 17, 45))["next"][0], "6:05 pm, in 20 minutes")
+        self.assertEqual(self.ok(local(2026, 12, 1, 18, 5))["next"][0], "6:05 pm, leaving now")
+
+    def test_back_from_the_village_says_when_it_reaches_the_lodge(self):
+        result = self.ok(local(2026, 12, 1, 16, 33), {"direction": "to_lodge"})
+        self.assertEqual((result["from"], result["to"]), ("Village Day Lodge", "Altitude stop (E6, by the hot tub)"))
+        self.assertEqual(result["next"][:2], ["4:40 pm, in 7 minutes, reaching the lodge about 4:45 pm",
+                                              "6 pm, in 1 hour 27 minutes, reaching the lodge about 6:05 pm"])
+        self.assertEqual((result["first_bus"], result["last_bus"]), ("8:40 am", "9:50 pm"))
+        self.assertNotIn("arrival_at_village", result)
+
+    def test_last_bus_of_the_day(self):
+        result = self.ok(local(2026, 12, 1, 21, 30))
+        self.assertEqual(result["next"], ["9:55 pm, in 25 minutes"])
+        self.assertEqual(result["note"], "The last bus today is at 9:55 pm.")
+
+    def test_after_the_last_bus_gives_tomorrows_first(self):
+        result = self.ok(local(2026, 12, 1, 22, 30))
+        self.assertEqual(result["day"], "tomorrow")
+        self.assertEqual(result["next"], ["8:45 am", "9:45 am", "11:45 am"])
+        self.assertEqual(result["note"], "No more shuttles today; the last one left at 9:55 pm.")
+
+    def test_tomorrows_timetable(self):
+        result = self.ok(local(2026, 12, 1, 9), {"day": "tomorrow"})
+        self.assertEqual(result["day"], "tomorrow")
+        self.assertEqual(len(result["times"]), 13)
+        self.assertEqual((result["times"][0], result["times"][-1]), ("8:45 am", "9:55 pm"))
+        self.assertNotIn("next", result)
+
+    def test_before_and_after_the_season(self):
+        result = self.ok(local(2026, 11, 15, 10))
+        self.assertEqual(result["note"], "The shuttle isn't running yet this season; it starts Saturday, November 21.")
+        self.assertEqual((result["day"], result["first_bus"]), ("Saturday, November 21", "8:45 am"))
+        for when, args in ((local(2027, 4, 10, 10), None), (local(2027, 4, 4, 9), {"day": "tomorrow"})):
+            with self.subTest(when=when):
+                result = self.call(when, args)
+                self.assertEqual(result, {"ok": False, "error": "The shuttle is done for the season; "
+                                                                "its last day was Sunday, April 4."})
+        result = self.call(local(2027, 4, 4, 23))
+        self.assertFalse(result["ok"])
+        self.assertIn("last day of the season", result["error"])
+
+    def test_season_dates_follow_the_hub_settings(self):
+        self.broker.settings[("shuttle", "season_start")] = "2026-12-05"
+        self.assertEqual(self.ok(local(2026, 12, 1, 10))["day"], "Saturday, December 5")
+
+
+def assistant_no_arrival():
+    from shuttle import assistant
+    return assistant.NO_ARRIVAL
